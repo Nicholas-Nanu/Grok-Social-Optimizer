@@ -1,0 +1,17 @@
+{
+  "name": "social-optimizer",
+  "version": "0.1.0",
+  "description": "Optimize social posts for platform algorithms using Grok",
+  "type": "module",
+  "bin": {
+    "optimize": "src/cli.js",
+    "optimize-web": "src/server.js"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "serve": "node src/server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
