@@ -69,6 +69,19 @@ export const PLATFORMS = {
     ],
     hashtagGuidance: "3-5 hashtags (the first 3 appear above the title).",
   },
+  "youtube-shorts": {
+    name: "YouTube Shorts",
+    limit: "Title up to 100 chars; keep it short and punchy. Caption is secondary to the on-screen hook.",
+    algo: [
+      "Swipe-away vs. watched is the dominant signal — the first 1-2 seconds must stop the scroll.",
+      "Average view duration and loops/replays drive distribution; tease a payoff to keep people watching.",
+      "Title must create a curiosity gap AND include the phrase people would search.",
+      "Comments and shares are strongly weighted; ask a quick question or invite a reaction.",
+      "2-4 relevant hashtags; a niche tag helps discovery (the #Shorts tag is now optional, not required).",
+      "Front-load searchable keywords — Shorts surface in both the Shorts feed and YouTube search.",
+    ],
+    hashtagGuidance: "2-4 relevant hashtags (niche tag helps; #Shorts optional).",
+  },
   threads: {
     name: "Threads",
     limit: "500 characters per post.",
@@ -96,6 +109,10 @@ export const PLATFORM_ALIASES = {
   li: "linkedin",
   youtube: "youtube",
   yt: "youtube",
+  "youtube-shorts": "youtube-shorts",
+  shorts: "youtube-shorts",
+  ytshorts: "youtube-shorts",
+  yts: "youtube-shorts",
   threads: "threads",
 };
 
