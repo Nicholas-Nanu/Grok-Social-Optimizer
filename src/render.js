@@ -80,9 +80,65 @@ export function renderReport(r) {
     out.push("");
   }
 
+  if (r.trends && Array.isArray(r.trends.riding) && r.trends.riding.length) {
+    out.push(rule("Live trends you can ride"));
+    for (const t of r.trends.riding) out.push(`  ${magenta("↗")} ${t}`);
+    if (r.trends.note) out.push(`  ${dim(r.trends.note)}`);
+    out.push("");
+  }
+
   if (r.notes) {
     out.push(rule("Notes"));
     out.push(indent(r.notes));
+    out.push("");
+  }
+
+  return out.join("\n");
+}
+
+const MOMENTUM_COLOR = { rising: green, peaking: yellow, cooling: red, evergreen: cyan };
+
+export function renderTrendBrief(r) {
+  const out = [];
+  out.push("");
+  out.push(cyan(bold(`  ${r.platform || "Trends"}`)) + (r.asOf ? dim(`  · as of ${r.asOf}`) : ""));
+  if (r.topic) out.push(dim(`  topic: ${r.topic}`));
+  out.push("");
+
+  if (Array.isArray(r.trends) && r.trends.length) {
+    out.push(rule("Trending now"));
+    for (const t of r.trends) {
+      const mcol = MOMENTUM_COLOR[String(t.momentum || "").toLowerCase()] || dim;
+      const badge = t.momentum ? mcol(`[${String(t.momentum).toUpperCase()}]`) : "";
+      out.push(`  ${bold(t.title || "")} ${badge}`);
+      if (t.why) out.push(`     ${dim(t.why)}`);
+      if (t.angle) out.push(`     ${cyan("→ angle:")} ${t.angle}`);
+      out.push("");
+    }
+  }
+
+  if (Array.isArray(r.hashtags) && r.hashtags.length) {
+    out.push(rule("Trending hashtags"));
+    out.push("  " + cyan(r.hashtags.join("  ")));
+    out.push("");
+  }
+
+  if (Array.isArray(r.formats) && r.formats.length) {
+    out.push(rule("Formats working now"));
+    for (const f of r.formats) out.push(`  ${yellow("•")} ${f}`);
+    out.push("");
+  }
+
+  if (Array.isArray(r.ideas) && r.ideas.length) {
+    out.push(rule("Post ideas to ride these"));
+    r.ideas.forEach((i, n) => out.push(`  ${bold(magenta(`${n + 1}.`))} ${i}`));
+    out.push("");
+  }
+
+  const sources = (r.sources || []).filter(Boolean);
+  if (sources.length) {
+    out.push(rule("Sources"));
+    out.push("  " + dim(sources.join(" · ")));
     out.push("");
   }
 

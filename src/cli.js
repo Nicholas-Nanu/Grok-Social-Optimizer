@@ -2,9 +2,9 @@
 import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import { PLATFORMS, resolvePlatform } from "./platforms.js";
-import { buildPrompt } from "./prompt.js";
+import { buildPrompt, buildTrendPrompt } from "./prompt.js";
 import { runGrok, extractJson } from "./grok.js";
-import { renderReport, log } from "./render.js";
+import { renderReport, renderTrendBrief, log } from "./render.js";
 
 const HELP = `
 optimize — tune a social post for the platform algorithm using Grok
@@ -13,11 +13,13 @@ Usage:
   optimize [options] "<your draft post>"
   echo "<draft>" | optimize -p tiktok
   optimize -f draft.txt -p x,instagram,tiktok
+  optimize --trends -p tiktok "<topic or niche>"
 
 Options:
-  -p, --platform <list>  Comma-separated: x, instagram, tiktok (default: x)
-  -f, --file <path>      Read the draft from a file
-  -w, --web              Let Grok use web search for current trends (slower)
+  -p, --platform <list>  Comma-separated, e.g. x,instagram,tiktok (default: x)
+  -f, --file <path>      Read the draft (or topic) from a file
+  -w, --web              Let Grok pull live trends and ground the post in them (slower)
+      --trends           Trend Brief mode: what's hot now for a topic (implies --web)
   -m, --model <id>       Override the Grok model
   -e, --effort <level>   Grok effort: low|medium|high|xhigh|max (only works with
                          models that support it; the default model does not)
@@ -25,7 +27,9 @@ Options:
   -h, --help             Show this help
 
 Examples:
-  optimize -p x,tiktok "shipping our new feature today, check it out https://x.com/y"
+  optimize -p x,tiktok "shipping our new feature today"
+  optimize -w -p instagram "our spring sale starts Friday"
+  optimize --trends -p tiktok,youtube-shorts "home espresso"
 `;
 
 async function readStdin() {
@@ -43,6 +47,7 @@ async function main() {
         platform: { type: "string", short: "p" },
         file: { type: "string", short: "f" },
         web: { type: "boolean", short: "w", default: false },
+        trends: { type: "boolean", default: false },
         model: { type: "string", short: "m" },
         effort: { type: "string", short: "e" },
         json: { type: "boolean", default: false },
@@ -79,7 +84,7 @@ async function main() {
   }
 
   if (!draft) {
-    log.error("No draft post provided.");
+    log.error(values.trends ? "No topic provided." : "No draft post provided.");
     process.stderr.write(HELP);
     process.exit(1);
   }
@@ -99,14 +104,19 @@ async function main() {
     if (!platformKeys.includes(key)) platformKeys.push(key);
   }
 
+  const names = platformKeys.map((k) => PLATFORMS[k].name).join(", ");
   log.info(
-    `Optimizing for ${platformKeys.map((k) => PLATFORMS[k].name).join(", ")} via Grok…`
+    values.trends
+      ? `Finding live trends on ${names} via Grok…`
+      : `Optimizing for ${names} via Grok…`
   );
 
   const tasks = platformKeys.map(async (platformKey) => {
-    const prompt = buildPrompt({ platformKey, draft, web: values.web });
+    const prompt = values.trends
+      ? buildTrendPrompt({ platformKey, topic: draft })
+      : buildPrompt({ platformKey, draft, web: values.web });
     const text = await runGrok(prompt, {
-      web: values.web,
+      web: values.trends || values.web,
       model: values.model,
       effort: values.effort,
     });
@@ -132,7 +142,8 @@ async function main() {
   if (values.json) {
     process.stdout.write(JSON.stringify(results, null, 2) + "\n");
   } else {
-    for (const r of results) process.stdout.write(renderReport(r) + "\n");
+    const render = values.trends ? renderTrendBrief : renderReport;
+    for (const r of results) process.stdout.write(render(r) + "\n");
   }
 }
 

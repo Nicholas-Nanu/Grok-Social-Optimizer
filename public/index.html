@@ -167,21 +167,64 @@
   .err { color: var(--red); font-size: 14px; }
   .loading { padding: 18px; color: var(--muted); font-size: 14px; }
   .elapsed { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .tabs { display: flex; gap: 8px; justify-content: center; margin: 14px 0 2px; }
+  .tab {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .tab.on { color: #fff; border-color: var(--accent); background: #1b2740; }
+  .hidden { display: none !important; }
+  .trend {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    border-radius: 10px;
+    padding: 11px 14px;
+    margin-bottom: 10px;
+  }
+  .trend .thead { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+  .trend .title { font-weight: 600; font-size: 14.5px; }
+  .trend .why { color: var(--muted); font-size: 13px; margin: 5px 0 0; }
+  .trend .angle { font-size: 13.5px; margin: 6px 0 0; }
+  .trend .angle b { color: var(--accent); font-weight: 600; }
+  .momentum { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+  .m-rising { color: var(--green); border-color: #1f5130; background: #112318; }
+  .m-peaking { color: var(--yellow); border-color: #5a4a16; background: #241f10; }
+  .m-cooling { color: var(--red); border-color: #5a2420; background: #241312; }
+  .m-evergreen { color: var(--accent); border-color: #243352; background: #182338; }
+  .ideas { margin: 0; padding-left: 18px; font-size: 14.5px; }
+  .ideas li { margin: 5px 0; }
+  .formats { display: flex; flex-wrap: wrap; gap: 8px; }
+  .format { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 5px 11px; font-size: 13px; }
+  .asof { color: var(--muted); font-size: 12px; font-weight: 400; }
+  .ridebox { background: #15233a; border: 1px solid #243352; border-radius: 10px; padding: 11px 14px; }
+  .ridebox ul { margin: 0 0 0 18px; padding: 0; font-size: 14px; }
+  .ridebox li { margin: 3px 0; }
 </style>
 </head>
 <body>
 <header>
   <h1>Social Optimizer</h1>
-  <p>Paste a draft, pick your platforms, and let Grok tune it for the algorithm.</p>
+  <p id="subtitle">Paste a draft, pick your platforms, and let Grok tune it for the algorithm.</p>
 </header>
 
 <div class="wrap">
+  <div class="tabs">
+    <button class="tab on" id="tab-optimize" data-mode="optimize">Optimize Post</button>
+    <button class="tab" id="tab-trends" data-mode="trends">Trend Brief</button>
+  </div>
   <div class="composer">
     <textarea id="draft" placeholder="Paste your draft post here…"></textarea>
     <div class="row">
       <div class="platforms" id="platforms"></div>
       <div class="grow"></div>
-      <label class="toggle"><input type="checkbox" id="web" /> Use live web trends (slower)</label>
+      <label class="toggle" id="weblabel"><input type="checkbox" id="web" /> Use live web trends (slower)</label>
     </div>
     <div class="row">
       <span class="charcount" id="charcount">0 characters</span>
@@ -283,7 +326,45 @@ function renderResult(r) {
         <p style="margin:0"><b>${esc(r.timing.best || "")}</b></p>
         ${r.timing.rationale ? `<p class="muted" style="margin:4px 0 0">${esc(r.timing.rationale)}</p>` : ""}
       </div>` : ""}
+      ${r.trends && Array.isArray(r.trends.riding) && r.trends.riding.length ? `<div class="section"><h3>Live trends you can ride</h3>
+        <div class="ridebox">
+          <ul>${r.trends.riding.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
+          ${r.trends.note ? `<p class="muted" style="margin:8px 0 0">${esc(r.trends.note)}</p>` : ""}
+        </div>
+      </div>` : ""}
       ${r.notes ? `<div class="section"><h3>Notes</h3><p style="margin:0">${esc(r.notes)}</p></div>` : ""}
+    </div>`;
+}
+
+function momentumClass(m) {
+  const k = String(m || "").toLowerCase();
+  return ["rising", "peaking", "cooling", "evergreen"].includes(k) ? "m-" + k : "m-evergreen";
+}
+
+function renderTrendBrief(r) {
+  const trends = (r?.trends || []).map((t) => `
+    <div class="trend">
+      <div class="thead">
+        <span class="title">${esc(t.title || "")}</span>
+        ${t.momentum ? `<span class="momentum ${momentumClass(t.momentum)}">${esc(t.momentum)}</span>` : ""}
+      </div>
+      ${t.why ? `<p class="why">${esc(t.why)}</p>` : ""}
+      ${t.angle ? `<p class="angle"><b>Your angle:</b> ${esc(t.angle)}</p>` : ""}
+    </div>`).join("");
+
+  const tags = (r?.hashtags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
+  const formats = (r?.formats || []).map((f) => `<span class="format">${esc(f)}</span>`).join("");
+  const ideas = (r?.ideas || []).map((i) => `<li>${esc(i)}</li>`).join("");
+  const sources = (r?.sources || []).filter(Boolean);
+
+  return `
+    <h2>${esc(r.platform || "Trends")} <span class="asof">${r.asOf ? "· as of " + esc(r.asOf) : ""}</span></h2>
+    <div class="body">
+      ${trends ? `<div class="section"><h3>Trending now</h3>${trends}</div>` : ""}
+      ${tags ? `<div class="section"><h3>Trending hashtags</h3><div class="tags">${tags}</div></div>` : ""}
+      ${formats ? `<div class="section"><h3>Formats working now</h3><div class="formats">${formats}</div></div>` : ""}
+      ${ideas ? `<div class="section"><h3>Post ideas to ride these</h3><ul class="ideas">${ideas}</ul></div>` : ""}
+      ${sources.length ? `<div class="section"><h3>Sources</h3><p class="muted" style="margin:0;font-size:13px">${sources.map(esc).join(" · ")}</p></div>` : ""}
     </div>`;
 }
 
@@ -311,21 +392,73 @@ async function optimizeOne(card, key, draft, web, timer) {
   }
 }
 
+async function trendsOne(card, key, topic, timer) {
+  try {
+    const r = await fetch("/api/trends", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic, platform: key }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    clearInterval(timer);
+    card.innerHTML = renderTrendBrief(data.result);
+  } catch (e) {
+    clearInterval(timer);
+    const name = PLATFORMS.find((p) => p.key === key)?.name || key;
+    card.innerHTML = `<h2>${esc(name)}</h2><div class="body err">⚠ ${esc(e.message)}</div>`;
+  }
+}
+
+// Mode switching (optimize | trends).
+let mode = "optimize";
+const COPY = {
+  optimize: {
+    subtitle: "Paste a draft, pick your platforms, and let Grok tune it for the algorithm.",
+    placeholder: "Paste your draft post here…",
+    button: "Optimize",
+    loading: (name) => `Asking Grok to optimize for ${name}…`,
+  },
+  trends: {
+    subtitle: "Enter a topic, pick your platforms, and Grok pulls what's trending right now.",
+    placeholder: "Enter a topic or niche, e.g. 'home espresso' or 'AI coding tools'…",
+    button: "Find Trends",
+    loading: (name) => `Asking Grok what's trending on ${name}…`,
+  },
+};
+
+function setMode(m) {
+  mode = m;
+  const c = COPY[m];
+  $("tab-optimize").classList.toggle("on", m === "optimize");
+  $("tab-trends").classList.toggle("on", m === "trends");
+  $("subtitle").textContent = c.subtitle;
+  $("draft").placeholder = c.placeholder;
+  $("go").textContent = c.button;
+  $("weblabel").classList.toggle("hidden", m === "trends");
+  $("charcount").classList.toggle("hidden", m === "trends");
+  $("results").innerHTML = "";
+}
+
+$("tab-optimize").addEventListener("click", () => setMode("optimize"));
+$("tab-trends").addEventListener("click", () => setMode("trends"));
+
 $("go").addEventListener("click", async () => {
-  const draft = $("draft").value.trim();
+  const text = $("draft").value.trim();
   const web = $("web").checked;
   const keys = [...selected];
-  if (!draft) { $("draft").focus(); return; }
+  if (!text) { $("draft").focus(); return; }
   if (!keys.length) { alert("Pick at least one platform."); return; }
 
   $("go").disabled = true;
   const results = $("results");
   results.innerHTML = "";
+  const c = COPY[mode];
   const cards = keys.map((key) => {
     const name = PLATFORMS.find((p) => p.key === key)?.name || key;
     const div = document.createElement("div");
     div.className = "card";
-    div.innerHTML = `<h2>${esc(name)}</h2><div class="loading"><span class="spinner"></span> Asking Grok to optimize for ${esc(name)}… <span class="elapsed">0s</span></div>`;
+    div.innerHTML = `<h2>${esc(name)}</h2><div class="loading"><span class="spinner"></span> ${esc(c.loading(name))} <span class="elapsed">0s</span></div>`;
     results.appendChild(div);
     const started = Date.now();
     const span = div.querySelector(".elapsed");
@@ -335,7 +468,11 @@ $("go").addEventListener("click", async () => {
     return { key, div, timer };
   });
 
-  await Promise.all(cards.map(({ key, div, timer }) => optimizeOne(div, key, draft, web, timer)));
+  await Promise.all(cards.map(({ key, div, timer }) =>
+    mode === "trends"
+      ? trendsOne(div, key, text, timer)
+      : optimizeOne(div, key, text, web, timer)
+  ));
   $("go").disabled = false;
 });
 

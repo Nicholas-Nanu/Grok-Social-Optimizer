@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { PLATFORMS, resolvePlatform } from "./platforms.js";
-import { buildPrompt } from "./prompt.js";
+import { buildPrompt, buildTrendPrompt } from "./prompt.js";
 import { runGrok, extractJson } from "./grok.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -67,6 +67,26 @@ const server = createServer(async (req, res) => {
 
       const prompt = buildPrompt({ platformKey: key, draft, web });
       const text = await runGrok(prompt, { web });
+      const data = extractJson(text);
+      if (!data.platform) data.platform = PLATFORMS[key].name;
+      return json(res, 200, { result: data });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/trends") {
+      const body = await readBody(req);
+      let parsed;
+      try {
+        parsed = JSON.parse(body || "{}");
+      } catch {
+        return json(res, 400, { error: "Invalid JSON body." });
+      }
+      const topic = (parsed.topic || "").trim();
+      const key = resolvePlatform(parsed.platform || "");
+      if (!topic) return json(res, 400, { error: "Missing topic." });
+      if (!key) return json(res, 400, { error: `Unknown platform "${parsed.platform}".` });
+
+      const prompt = buildTrendPrompt({ platformKey: key, topic });
+      const text = await runGrok(prompt, { web: true });
       const data = extractJson(text);
       if (!data.platform) data.platform = PLATFORMS[key].name;
       return json(res, 200, { result: data });
