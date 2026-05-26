@@ -256,6 +256,7 @@
 <div class="wrap">
   <div class="tabs">
     <button class="tab on" id="tab-optimize" data-mode="optimize">Optimize Post</button>
+    <button class="tab" id="tab-repurpose" data-mode="repurpose">Repurpose</button>
     <button class="tab" id="tab-trends" data-mode="trends">Trend Brief</button>
   </div>
   <div class="composer">
@@ -454,6 +455,60 @@ async function optimizeOne(card, key, draft, web, timer, voice) {
   }
 }
 
+function renderRepurpose(r) {
+  const alternates = (r?.alternates || []).map((a) => `
+    <div class="rewrite">
+      <div class="head">
+        <span class="label">${esc(a.label || "Alternate")}</span>
+        <button class="copy" data-copy="${esc(a.text)}">Copy</button>
+      </div>
+      <div class="text">${esc(a.text || "")}</div>
+    </div>`).join("");
+  const tags = (r?.hashtags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
+
+  return `
+    <h2>${esc(r.platform || "Result")} ${r.format ? `<span class="asof">· ${esc(r.format)}</span>` : ""}</h2>
+    <div class="body">
+      ${r.title ? `<div class="section"><h3>Title</h3>
+        <div class="rewrite"><div class="head"><span class="label">Title</span>
+          <button class="copy" data-copy="${esc(r.title)}">Copy</button></div>
+          <div class="text">${esc(r.title)}</div></div>
+      </div>` : ""}
+      ${r.post ? `<div class="section"><h3>${r.title ? "Description / body" : "Post"}</h3>
+        <div class="rewrite"><div class="head"><span class="label">Primary</span>
+          <button class="copy" data-copy="${esc(r.post)}">Copy</button></div>
+          <div class="text">${esc(r.post)}</div></div>
+      </div>` : ""}
+      ${alternates ? `<div class="section"><h3>Alternates</h3>${alternates}</div>` : ""}
+      ${tags ? `<div class="section"><h3>Hashtags</h3><div class="tags">${tags}</div></div>` : ""}
+      ${r.notes ? `<div class="section"><h3>Notes</h3><p style="margin:0">${esc(r.notes)}</p></div>` : ""}
+    </div>`;
+}
+
+async function repurposeOne(card, key, source, web, timer, voice) {
+  try {
+    const r = await fetch("/api/repurpose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source, platform: key, web, voice: voice || undefined }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    clearInterval(timer);
+    card.innerHTML = renderRepurpose(data.result);
+    card.querySelectorAll(".copy").forEach((b) =>
+      b.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(b.dataset.copy);
+        const t = b.textContent; b.textContent = "Copied!";
+        setTimeout(() => (b.textContent = t), 1200);
+      }));
+  } catch (e) {
+    clearInterval(timer);
+    const name = PLATFORMS.find((p) => p.key === key)?.name || key;
+    card.innerHTML = `<h2>${esc(name)}</h2><div class="body err">⚠ ${esc(e.message)}</div>`;
+  }
+}
+
 async function trendsOne(card, key, topic, timer) {
   try {
     const r = await fetch("/api/trends", {
@@ -472,7 +527,7 @@ async function trendsOne(card, key, topic, timer) {
   }
 }
 
-// Mode switching (optimize | trends).
+// Mode switching (optimize | repurpose | trends).
 let mode = "optimize";
 const COPY = {
   optimize: {
@@ -480,6 +535,12 @@ const COPY = {
     placeholder: "Paste your draft post here…",
     button: "Optimize",
     loading: (name) => `Asking Grok to optimize for ${name}…`,
+  },
+  repurpose: {
+    subtitle: "Paste a long source (blog post, transcript, talk outline) and get one native post for each platform.",
+    placeholder: "Paste a blog post, transcript, talk outline, or idea brief…",
+    button: "Repurpose for All",
+    loading: (name) => `Asking Grok to repurpose for ${name}…`,
   },
   trends: {
     subtitle: "Enter a topic, pick your platforms, and Grok pulls what's trending right now.",
@@ -493,6 +554,7 @@ function setMode(m) {
   mode = m;
   const c = COPY[m];
   $("tab-optimize").classList.toggle("on", m === "optimize");
+  $("tab-repurpose").classList.toggle("on", m === "repurpose");
   $("tab-trends").classList.toggle("on", m === "trends");
   $("subtitle").textContent = c.subtitle;
   $("draft").placeholder = c.placeholder;
@@ -505,6 +567,7 @@ function setMode(m) {
 }
 
 $("tab-optimize").addEventListener("click", () => setMode("optimize"));
+$("tab-repurpose").addEventListener("click", () => setMode("repurpose"));
 $("tab-trends").addEventListener("click", () => setMode("trends"));
 
 $("go").addEventListener("click", async () => {
@@ -536,7 +599,9 @@ $("go").addEventListener("click", async () => {
   await Promise.all(cards.map(({ key, div, timer }) =>
     mode === "trends"
       ? trendsOne(div, key, text, timer)
-      : optimizeOne(div, key, text, web, timer, voice)
+      : mode === "repurpose"
+        ? repurposeOne(div, key, text, web, timer, voice)
+        : optimizeOne(div, key, text, web, timer, voice)
   ));
   $("go").disabled = false;
 });

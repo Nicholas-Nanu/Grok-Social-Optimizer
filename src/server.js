@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { PLATFORMS, resolvePlatform } from "./platforms.js";
-import { buildPrompt, buildTrendPrompt } from "./prompt.js";
+import { buildPrompt, buildTrendPrompt, buildRepurposePrompt } from "./prompt.js";
 import { runGrok, extractJson } from "./grok.js";
 import { listVoices, getVoice, saveVoice, deleteVoice, validateName } from "./voices.js";
 
@@ -117,6 +117,30 @@ const server = createServer(async (req, res) => {
       } catch (e) {
         return json(res, 400, { error: e.message });
       }
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/repurpose") {
+      const body = await readBody(req);
+      let parsed;
+      try { parsed = JSON.parse(body || "{}"); } catch { return json(res, 400, { error: "Invalid JSON body." }); }
+      const source = (parsed.source || "").trim();
+      const key = resolvePlatform(parsed.platform || "");
+      const web = !!parsed.web;
+      if (!source) return json(res, 400, { error: "Missing source content." });
+      if (!key) return json(res, 400, { error: `Unknown platform "${parsed.platform}".` });
+
+      let voice = null;
+      if (parsed.voice) {
+        try { voice = await getVoice(parsed.voice); } catch (e) { return json(res, 400, { error: e.message }); }
+        if (!voice) return json(res, 400, { error: `Voice "${parsed.voice}" not found.` });
+      }
+
+      const prompt = buildRepurposePrompt({ platformKey: key, source, voice, web });
+      const text = await runGrok(prompt, { web });
+      const data = extractJson(text);
+      if (!data.platform) data.platform = PLATFORMS[key].name;
+      if (voice) data.voice = voice.displayName || voice.name;
+      return json(res, 200, { result: data });
     }
 
     if (req.method === "POST" && url.pathname === "/api/trends") {

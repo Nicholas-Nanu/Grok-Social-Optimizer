@@ -102,3 +102,55 @@ Respond with ONLY a single valid JSON object (no markdown, no code fences, no co
 
 Provide 4-6 trends (ordered by momentum), 4-8 trending hashtags, 3 formats, and 3 concrete post ideas. Output JSON only.`;
 }
+
+// Builds a single-shot prompt to REPURPOSE long source content (blog post,
+// transcript, talk outline, idea brief) into a native post for one platform.
+// Output is ONE primary post (with title for YouTube formats), 2 alternates,
+// hashtags, and a format note — not 3 rewrites of the same draft.
+export function buildRepurposePrompt({ platformKey, source, voice, web }) {
+  const p = PLATFORMS[platformKey];
+  const algoLines = p.algo.map((l) => `- ${l}`).join("\n");
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Bound the source size so prompts stay manageable.
+  const trimmed = source.length > 16000 ? source.slice(0, 16000) + "\n\n[…source truncated…]" : source;
+
+  const webNote = web
+    ? `You may use web/X search to ground hashtags or angles in what is currently trending on ${p.name} (today is ${today}).`
+    : `Do not use any tools. Rely on your own knowledge.`;
+
+  const voiceBlock = buildVoiceBlock(voice);
+
+  return `You are a social media repurposing expert. Your job is to read a piece of long-form source content and produce ONE post written natively for ${p.name} — not a summary, not the source itself shortened, but a fresh post that stands alone and is shaped for this platform's algorithm.
+
+${p.name} algorithm facts to optimize for:
+${algoLines}
+
+Constraints: ${p.limit}
+Hashtag guidance: ${p.hashtagGuidance}
+${webNote}
+${voiceBlock}
+
+Source content to repurpose:
+"""
+${trimmed}
+"""
+
+Extract the single strongest angle from the source for ${p.name} — the hook a ${p.name} scroller would stop for. Then write that post natively in this platform's format. Do NOT compress the entire source into one post; pick one sharp thread and execute it.
+
+Respond with ONLY a single valid JSON object (no markdown, no code fences, no commentary) matching exactly this schema:
+
+{
+  "platform": "${p.name}",
+  "format": "<single post | thread | carousel script | title+description | caption with on-screen hook | other — what shape the output takes>",
+  "title": "<used by YouTube long-form (the video title) and YouTube Shorts (visible title); set to null for other platforms>",
+  "post": "<the primary post text — caption for IG/TikTok/Shorts, body for X/LinkedIn/Threads, description for YT long-form. Within the character limit. Self-contained.>",
+  "alternates": [
+    { "label": "<short style name>", "text": "<a fully alternate post with a different angle/format from the source>" }
+  ],
+  "hashtags": ["#tag", "..."],
+  "notes": "<one or two sentences of platform-specific guidance, e.g. 'pair with a 7s demo clip', 'post the link in the first reply', 'use this as the carousel cover'>"
+}
+
+Provide exactly 2 alternates with distinctly different angles (not just length variants). Keep all post text within the platform character limit.${voice ? " Every output MUST match the voice profile above — same tone, vocabulary, rhythm, and quirks. Favor voice authenticity over generic polish." : ""} Output JSON only.`;
+}

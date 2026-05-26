@@ -2,9 +2,9 @@
 import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import { PLATFORMS, resolvePlatform } from "./platforms.js";
-import { buildPrompt, buildTrendPrompt } from "./prompt.js";
+import { buildPrompt, buildTrendPrompt, buildRepurposePrompt } from "./prompt.js";
 import { runGrok, extractJson } from "./grok.js";
-import { renderReport, renderTrendBrief, log } from "./render.js";
+import { renderReport, renderTrendBrief, renderRepurpose, log } from "./render.js";
 import { getVoice } from "./voices.js";
 
 const HELP = `
@@ -21,6 +21,7 @@ Options:
   -f, --file <path>      Read the draft (or topic) from a file
   -w, --web              Let Grok pull live trends and ground the post in them (slower)
       --trends           Trend Brief mode: what's hot now for a topic (implies --web)
+      --repurpose        Repurpose mode: long source → one native post per platform
   -v, --voice <name>     Apply a saved voice profile (manage via the web UI)
   -m, --model <id>       Override the Grok model
   -e, --effort <level>   Grok effort: low|medium|high|xhigh|max (only works with
@@ -50,6 +51,7 @@ async function main() {
         file: { type: "string", short: "f" },
         web: { type: "boolean", short: "w", default: false },
         trends: { type: "boolean", default: false },
+        repurpose: { type: "boolean", default: false },
         voice: { type: "string", short: "v" },
         model: { type: "string", short: "m" },
         effort: { type: "string", short: "e" },
@@ -86,8 +88,17 @@ async function main() {
     draft = await readStdin();
   }
 
+  if (values.trends && values.repurpose) {
+    log.error("--trends and --repurpose are mutually exclusive.");
+    process.exit(2);
+  }
+
   if (!draft) {
-    log.error(values.trends ? "No topic provided." : "No draft post provided.");
+    log.error(
+      values.trends ? "No topic provided." :
+      values.repurpose ? "No source content provided." :
+      "No draft post provided."
+    );
     process.stderr.write(HELP);
     process.exit(1);
   }
@@ -107,7 +118,7 @@ async function main() {
     if (!platformKeys.includes(key)) platformKeys.push(key);
   }
 
-  // Voice profile (optimize mode only).
+  // Voice profile (optimize/repurpose modes; not for trends).
   let voice = null;
   if (values.voice && !values.trends) {
     try {
@@ -127,13 +138,17 @@ async function main() {
   log.info(
     values.trends
       ? `Finding live trends on ${names} via Grok…`
-      : `Optimizing for ${names}${voiceSuffix} via Grok…`
+      : values.repurpose
+        ? `Repurposing source into ${names}${voiceSuffix} via Grok…`
+        : `Optimizing for ${names}${voiceSuffix} via Grok…`
   );
 
   const tasks = platformKeys.map(async (platformKey) => {
     const prompt = values.trends
       ? buildTrendPrompt({ platformKey, topic: draft })
-      : buildPrompt({ platformKey, draft, web: values.web, voice });
+      : values.repurpose
+        ? buildRepurposePrompt({ platformKey, source: draft, voice, web: values.web })
+        : buildPrompt({ platformKey, draft, web: values.web, voice });
     const text = await runGrok(prompt, {
       web: values.trends || values.web,
       model: values.model,
@@ -161,7 +176,7 @@ async function main() {
   if (values.json) {
     process.stdout.write(JSON.stringify(results, null, 2) + "\n");
   } else {
-    const render = values.trends ? renderTrendBrief : renderReport;
+    const render = values.trends ? renderTrendBrief : values.repurpose ? renderRepurpose : renderReport;
     for (const r of results) process.stdout.write(render(r) + "\n");
   }
 }

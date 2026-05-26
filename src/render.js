@@ -152,6 +152,48 @@ function indent(text, pad = "     ") {
     .join("\n");
 }
 
+export function renderRepurpose(r) {
+  const out = [];
+  out.push("");
+  out.push(cyan(bold(`  ${r.platform || "Result"}`)) + (r.format ? dim(`  · ${r.format}`) : ""));
+  out.push("");
+
+  if (r.title) {
+    out.push(rule("Title"));
+    out.push(`  ${bold(r.title)}`);
+    out.push("");
+  }
+
+  if (r.post) {
+    out.push(rule("Post"));
+    out.push(indent(r.post));
+    out.push("");
+  }
+
+  if (Array.isArray(r.alternates) && r.alternates.length) {
+    out.push(rule("Alternates"));
+    r.alternates.forEach((a, i) => {
+      out.push(`  ${bold(magenta(`${i + 1}. ${a.label || "Alternate"}`))}`);
+      out.push(indent(a.text || ""));
+      out.push("");
+    });
+  }
+
+  if (Array.isArray(r.hashtags) && r.hashtags.length) {
+    out.push(rule("Hashtags"));
+    out.push("  " + cyan(r.hashtags.join("  ")));
+    out.push("");
+  }
+
+  if (r.notes) {
+    out.push(rule("Notes"));
+    out.push(indent(r.notes));
+    out.push("");
+  }
+
+  return out.join("\n");
+}
+
 export const log = {
   info: (s) => process.stderr.write(dim(s) + "\n"),
   error: (s) => process.stderr.write(red("Error: ") + s + "\n"),
