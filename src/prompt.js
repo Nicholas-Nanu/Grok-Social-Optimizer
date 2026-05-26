@@ -1,7 +1,7 @@
 import { PLATFORMS } from "./platforms.js";
 
 // Builds a single-shot prompt instructing Grok to return strict JSON for one platform.
-export function buildPrompt({ platformKey, draft, web, voice }) {
+export function buildPrompt({ platformKey, draft, web, voice, performance }) {
   const p = PLATFORMS[platformKey];
   const algoLines = p.algo.map((l) => `- ${l}`).join("\n");
 
@@ -12,6 +12,7 @@ export function buildPrompt({ platformKey, draft, web, voice }) {
     : `Do not use any tools. Rely on your own knowledge. Set "trends" to null.`;
 
   const voiceBlock = buildVoiceBlock(voice);
+  const perfBlock = buildPerformanceBlock(performance);
 
   return `You are an expert social media growth strategist optimizing a post for the ${p.name} algorithm.
 
@@ -21,7 +22,7 @@ ${algoLines}
 Constraints: ${p.limit}
 Hashtag guidance: ${p.hashtagGuidance}
 ${webNote}
-${voiceBlock}
+${voiceBlock}${perfBlock}
 
 The user's draft post:
 """
@@ -47,7 +48,7 @@ Analyze and optimize this draft. Respond with ONLY a single valid JSON object (n
   "notes": "<one or two sentences of extra advice>"
 }
 
-Provide exactly 3 rewrites (distinct styles), 4 hooks, and hashtags per the guidance above. Keep all post text within the platform character limit.${voice ? " Every rewrite and hook MUST match the voice profile above — same tone, vocabulary, rhythm, and quirks. If the voice conflicts with a generic algorithm best practice, favor the voice (authentic > polished)." : ""} Output JSON only.`;
+Provide exactly 3 rewrites (distinct styles), 4 hooks, and hashtags per the guidance above. Keep all post text within the platform character limit.${voice ? " Every rewrite and hook MUST match the voice profile above — same tone, vocabulary, rhythm, and quirks. If the voice conflicts with a generic algorithm best practice, favor the voice (authentic > polished)." : ""}${performance ? " The performance benchmarks above are proprietary data about what actually works for THIS account; weight those patterns more than generic best practices, and use them to calibrate the reach score (compare the draft to the top performers, not to the open internet)." : ""} Output JSON only.`;
 }
 
 // Build a "VOICE PROFILE" block to inject into the prompt when a voice is selected.
@@ -107,7 +108,7 @@ Provide 4-6 trends (ordered by momentum), 4-8 trending hashtags, 3 formats, and 
 // transcript, talk outline, idea brief) into a native post for one platform.
 // Output is ONE primary post (with title for YouTube formats), 2 alternates,
 // hashtags, and a format note — not 3 rewrites of the same draft.
-export function buildRepurposePrompt({ platformKey, source, voice, web }) {
+export function buildRepurposePrompt({ platformKey, source, voice, web, performance }) {
   const p = PLATFORMS[platformKey];
   const algoLines = p.algo.map((l) => `- ${l}`).join("\n");
   const today = new Date().toISOString().slice(0, 10);
@@ -120,6 +121,7 @@ export function buildRepurposePrompt({ platformKey, source, voice, web }) {
     : `Do not use any tools. Rely on your own knowledge.`;
 
   const voiceBlock = buildVoiceBlock(voice);
+  const perfBlock = buildPerformanceBlock(performance);
 
   return `You are a social media repurposing expert. Your job is to read a piece of long-form source content and produce ONE post written natively for ${p.name} — not a summary, not the source itself shortened, but a fresh post that stands alone and is shaped for this platform's algorithm.
 
@@ -129,7 +131,7 @@ ${algoLines}
 Constraints: ${p.limit}
 Hashtag guidance: ${p.hashtagGuidance}
 ${webNote}
-${voiceBlock}
+${voiceBlock}${perfBlock}
 
 Source content to repurpose:
 """
@@ -152,5 +154,19 @@ Respond with ONLY a single valid JSON object (no markdown, no code fences, no co
   "notes": "<one or two sentences of platform-specific guidance, e.g. 'pair with a 7s demo clip', 'post the link in the first reply', 'use this as the carousel cover'>"
 }
 
-Provide exactly 2 alternates with distinctly different angles (not just length variants). Keep all post text within the platform character limit.${voice ? " Every output MUST match the voice profile above — same tone, vocabulary, rhythm, and quirks. Favor voice authenticity over generic polish." : ""} Output JSON only.`;
+Provide exactly 2 alternates with distinctly different angles (not just length variants). Keep all post text within the platform character limit.${voice ? " Every output MUST match the voice profile above — same tone, vocabulary, rhythm, and quirks. Favor voice authenticity over generic polish." : ""}${performance ? " The performance benchmarks above show what actually works for THIS account; mimic the patterns of the top performers." : ""} Output JSON only.`;
 }
+
+// Build a "PERFORMANCE BENCHMARKS" block from the user's measured top posts.
+// Grounds the model in what actually works for THIS account vs. generic advice.
+function buildPerformanceBlock(performance) {
+  if (!performance || !Array.isArray(performance.records) || !performance.records.length) return "";
+  const label = performance.scoreLabel ? ` (ranked by ${performance.scoreLabel})` : "";
+  const items = performance.records.map((r, i) => {
+    const score = typeof r.score === "number" ? Math.round(r.score).toLocaleString() : "";
+    const scorePart = score ? `score ${score}` : "no score";
+    return `${i + 1}. (${scorePart}) "${String(r.text).replace(/\n+/g, " ").slice(0, 600)}"`;
+  }).join("\n");
+  return `\nPERFORMANCE BENCHMARKS — this account's TOP-PERFORMING past posts on this platform${label}. These are proprietary engagement data from this specific account, not the open internet:\n${items}\nMimic the patterns these top performers share (hook style, length, structure, rhythm, calls-to-action). Weight what worked for THIS audience more than generic best practices.\n`;
+}
+

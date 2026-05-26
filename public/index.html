@@ -266,6 +266,11 @@
       <select id="voiceSelect"><option value="">(no voice)</option></select>
       <button class="ghost-btn" id="voiceManage" type="button">Manage</button>
     </div>
+    <div class="row" id="perfrow">
+      <span class="vlabel">Performance</span>
+      <select id="perfSelect"><option value="">(no dataset)</option></select>
+      <button class="ghost-btn" id="perfManage" type="button">Manage</button>
+    </div>
     <div class="row">
       <div class="platforms" id="platforms"></div>
       <div class="grow"></div>
@@ -292,6 +297,25 @@
       <div class="vform-actions">
         <button class="ghost-btn" id="vcancel" type="button">Cancel</button>
         <button class="go" id="vsave" type="button" style="padding:8px 18px;font-size:13px">Save voice</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="vpanel hidden" id="perfPanel">
+    <h4>Your performance datasets</h4>
+    <div class="vlist" id="perfList"><span class="empty">No datasets imported yet.</span></div>
+    <h4>Import dataset from CSV</h4>
+    <p class="muted" style="margin:0 0 8px;font-size:13px">CSV needs a header row plus one column with the post text (any of: post, text, caption, content). Numeric columns (likes, comments, shares, saves, views) are summed into a composite engagement score — or include a "score" column to override.</p>
+    <div class="vform">
+      <div class="row2">
+        <input class="vfield" id="pname" placeholder="name (lowercase-dashes, e.g. my-x-jan-26)" />
+        <input class="vfield" id="pdisplay" placeholder="Display name (e.g. My X — Jan 2026)" />
+      </div>
+      <select id="pplatform" class="vfield"></select>
+      <textarea class="vfield" id="pcsv" rows="8" placeholder="Paste CSV here (with header row)…"></textarea>
+      <div class="vform-actions">
+        <button class="ghost-btn" id="pcancel" type="button">Cancel</button>
+        <button class="go" id="psave" type="button" style="padding:8px 18px;font-size:13px">Import CSV</button>
       </div>
     </div>
   </div>
@@ -431,12 +455,12 @@ function renderTrendBrief(r) {
     </div>`;
 }
 
-async function optimizeOne(card, key, draft, web, timer, voice) {
+async function optimizeOne(card, key, draft, web, timer, voice, performance) {
   try {
     const r = await fetch("/api/optimize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ draft, platform: key, web, voice: voice || undefined }),
+      body: JSON.stringify({ draft, platform: key, web, voice: voice || undefined, performance: performance || undefined }),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
@@ -485,12 +509,12 @@ function renderRepurpose(r) {
     </div>`;
 }
 
-async function repurposeOne(card, key, source, web, timer, voice) {
+async function repurposeOne(card, key, source, web, timer, voice, performance) {
   try {
     const r = await fetch("/api/repurpose", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source, platform: key, web, voice: voice || undefined }),
+      body: JSON.stringify({ source, platform: key, web, voice: voice || undefined, performance: performance || undefined }),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
@@ -562,7 +586,11 @@ function setMode(m) {
   $("weblabel").classList.toggle("hidden", m === "trends");
   $("charcount").classList.toggle("hidden", m === "trends");
   $("voicerow").classList.toggle("hidden", m === "trends");
-  if (m === "trends") $("voicePanel").classList.add("hidden");
+  $("perfrow").classList.toggle("hidden", m === "trends");
+  if (m === "trends") {
+    $("voicePanel").classList.add("hidden");
+    $("perfPanel").classList.add("hidden");
+  }
   $("results").innerHTML = "";
 }
 
@@ -574,6 +602,7 @@ $("go").addEventListener("click", async () => {
   const text = $("draft").value.trim();
   const web = $("web").checked;
   const voice = $("voiceSelect").value;
+  const performance = $("perfSelect").value;
   const keys = [...selected];
   if (!text) { $("draft").focus(); return; }
   if (!keys.length) { alert("Pick at least one platform."); return; }
@@ -600,8 +629,8 @@ $("go").addEventListener("click", async () => {
     mode === "trends"
       ? trendsOne(div, key, text, timer)
       : mode === "repurpose"
-        ? repurposeOne(div, key, text, web, timer, voice)
-        : optimizeOne(div, key, text, web, timer, voice)
+        ? repurposeOne(div, key, text, web, timer, voice, performance)
+        : optimizeOne(div, key, text, web, timer, voice, performance)
   ));
   $("go").disabled = false;
 });
@@ -711,8 +740,103 @@ $("vsave").addEventListener("click", async () => {
   }
 });
 
+// ── Performance datasets ─────────────────────────────────────────────────
+async function loadPerformanceDatasets() {
+  let list = [];
+  try {
+    const r = await fetch("/api/performance");
+    if (r.ok) list = await r.json();
+  } catch {}
+  const current = $("perfSelect").value;
+  $("perfSelect").innerHTML =
+    `<option value="">(no dataset)</option>` +
+    list.map((d) => `<option value="${esc(d.name)}">${esc(d.displayName || d.name)}${d.platform ? ` · ${esc(d.platform)}` : ""}</option>`).join("");
+  if (current && list.find((d) => d.name === current)) $("perfSelect").value = current;
+  renderPerformanceList(list);
+}
+
+function renderPerformanceList(list) {
+  const el = $("perfList");
+  if (!list.length) { el.innerHTML = `<span class="empty">No datasets imported yet.</span>`; return; }
+  el.innerHTML = list.map((d) => `
+    <div class="vitem">
+      <span class="vname">${esc(d.displayName || d.name)}</span>
+      <span class="vmeta">${d.platform ? esc(d.platform) + " · " : ""}${d.recordCount} record${d.recordCount === 1 ? "" : "s"}${d.scoreLabel ? " · " + esc(d.scoreLabel) : ""}</span>
+      <span class="grow"></span>
+      <button class="ghost-btn danger" data-pdel="${esc(d.name)}" type="button">Delete</button>
+    </div>`).join("");
+  el.querySelectorAll("[data-pdel]").forEach((b) =>
+    b.addEventListener("click", () => removeDataset(b.dataset.pdel)));
+}
+
+function populatePerfPlatformSelect() {
+  $("pplatform").innerHTML =
+    `<option value="">(any platform)</option>` +
+    PLATFORMS.map((p) => `<option value="${esc(p.key)}">${esc(p.name)}</option>`).join("");
+}
+
+function clearPerfForm() {
+  $("pname").value = "";
+  $("pdisplay").value = "";
+  $("pcsv").value = "";
+  if ($("pplatform").options.length) $("pplatform").value = "";
+}
+
+async function removeDataset(name) {
+  if (!confirm(`Delete dataset "${name}"?`)) return;
+  const r = await fetch("/api/performance/" + encodeURIComponent(name), { method: "DELETE" });
+  if (!r.ok) { alert("Delete failed."); return; }
+  if ($("perfSelect").value === name) $("perfSelect").value = "";
+  await loadPerformanceDatasets();
+}
+
+$("perfManage").addEventListener("click", () => {
+  const p = $("perfPanel");
+  p.classList.toggle("hidden");
+  if (!p.classList.contains("hidden")) {
+    populatePerfPlatformSelect();
+    clearPerfForm();
+  }
+});
+$("pcancel").addEventListener("click", () => { clearPerfForm(); $("perfPanel").classList.add("hidden"); });
+
+$("psave").addEventListener("click", async () => {
+  const name = $("pname").value.trim();
+  if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) {
+    alert("Name must be lowercase letters, digits, and dashes (max 41 chars).");
+    return;
+  }
+  const csv = $("pcsv").value;
+  if (!csv.trim()) { alert("Paste a CSV with a header row first."); return; }
+  $("psave").disabled = true;
+  try {
+    const r = await fetch("/api/performance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        displayName: $("pdisplay").value.trim() || name,
+        platform: $("pplatform").value || null,
+        csv,
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    alert(`Imported ${data.recordCount} record${data.recordCount === 1 ? "" : "s"}. Score: ${data.scoreLabel}`);
+    await loadPerformanceDatasets();
+    $("perfSelect").value = name;
+    clearPerfForm();
+    $("perfPanel").classList.add("hidden");
+  } catch (e) {
+    alert("Import failed: " + e.message);
+  } finally {
+    $("psave").disabled = false;
+  }
+});
+
 loadPlatforms();
 loadVoices();
+loadPerformanceDatasets();
 </script>
 </body>
 </html>

@@ -6,6 +6,7 @@ import { buildPrompt, buildTrendPrompt, buildRepurposePrompt } from "./prompt.js
 import { runGrok, extractJson } from "./grok.js";
 import { renderReport, renderTrendBrief, renderRepurpose, log } from "./render.js";
 import { getVoice } from "./voices.js";
+import { getDataset, topRecords } from "./performance.js";
 
 const HELP = `
 optimize — tune a social post for the platform algorithm using Grok
@@ -23,6 +24,8 @@ Options:
       --trends           Trend Brief mode: what's hot now for a topic (implies --web)
       --repurpose        Repurpose mode: long source → one native post per platform
   -v, --voice <name>     Apply a saved voice profile (manage via the web UI)
+  -P, --performance <n>  Use a saved performance dataset to ground prompts in
+                         what works for YOUR account (manage via the web UI)
   -m, --model <id>       Override the Grok model
   -e, --effort <level>   Grok effort: low|medium|high|xhigh|max (only works with
                          models that support it; the default model does not)
@@ -53,6 +56,7 @@ async function main() {
         trends: { type: "boolean", default: false },
         repurpose: { type: "boolean", default: false },
         voice: { type: "string", short: "v" },
+        performance: { type: "string", short: "P" },
         model: { type: "string", short: "m" },
         effort: { type: "string", short: "e" },
         json: { type: "boolean", default: false },
@@ -133,6 +137,32 @@ async function main() {
     }
   }
 
+  // Performance dataset (optimize/repurpose modes; not for trends).
+  let perfDataset = null;
+  if (values.performance && !values.trends) {
+    try {
+      perfDataset = await getDataset(values.performance);
+    } catch (e) {
+      log.error(e.message);
+      process.exit(1);
+    }
+    if (!perfDataset) {
+      log.error(`Performance dataset "${values.performance}" not found. Manage in the web UI.`);
+      process.exit(1);
+    }
+  }
+  // Per-platform performance payload: only inject if platform tag matches.
+  const performanceFor = (platformKey) => {
+    if (!perfDataset) return null;
+    if (perfDataset.platform && perfDataset.platform !== platformKey) return null;
+    return {
+      name: perfDataset.name,
+      displayName: perfDataset.displayName,
+      scoreLabel: perfDataset.scoreLabel,
+      records: topRecords(perfDataset, 5),
+    };
+  };
+
   const names = platformKeys.map((k) => PLATFORMS[k].name).join(", ");
   const voiceSuffix = voice ? ` in voice "${voice.displayName || voice.name}"` : "";
   log.info(
@@ -144,11 +174,12 @@ async function main() {
   );
 
   const tasks = platformKeys.map(async (platformKey) => {
+    const performance = performanceFor(platformKey);
     const prompt = values.trends
       ? buildTrendPrompt({ platformKey, topic: draft })
       : values.repurpose
-        ? buildRepurposePrompt({ platformKey, source: draft, voice, web: values.web })
-        : buildPrompt({ platformKey, draft, web: values.web, voice });
+        ? buildRepurposePrompt({ platformKey, source: draft, voice, web: values.web, performance })
+        : buildPrompt({ platformKey, draft, web: values.web, voice, performance });
     const text = await runGrok(prompt, {
       web: values.trends || values.web,
       model: values.model,

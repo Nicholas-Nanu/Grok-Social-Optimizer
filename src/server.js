@@ -7,6 +7,10 @@ import { PLATFORMS, resolvePlatform } from "./platforms.js";
 import { buildPrompt, buildTrendPrompt, buildRepurposePrompt } from "./prompt.js";
 import { runGrok, extractJson } from "./grok.js";
 import { listVoices, getVoice, saveVoice, deleteVoice, validateName } from "./voices.js";
+import {
+  listDatasets, getDataset, saveDataset, deleteDataset,
+  validateName as validatePerfName, topRecords,
+} from "./performance.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(__dirname, "..", "public");
@@ -18,6 +22,23 @@ function send(res, status, type, body) {
 }
 const json = (res, status, obj) =>
   send(res, status, "application/json; charset=utf-8", JSON.stringify(obj));
+
+// Load a performance dataset and return a payload for the prompt — only if its
+// platform tag matches the platform being optimized (mismatched data would hurt,
+// not help). Returns null if the dataset doesn't apply.
+async function loadPerformanceFor(name, platformKey) {
+  if (!name) return null;
+  let d;
+  try { d = await getDataset(name); } catch { return null; }
+  if (!d) return null;
+  if (d.platform && d.platform !== platformKey) return null;
+  return {
+    name: d.name,
+    displayName: d.displayName,
+    scoreLabel: d.scoreLabel,
+    records: topRecords(d, 5),
+  };
+}
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
@@ -75,13 +96,55 @@ const server = createServer(async (req, res) => {
         }
         if (!voice) return json(res, 400, { error: `Voice "${parsed.voice}" not found.` });
       }
+      const performance = await loadPerformanceFor(parsed.performance, key);
 
-      const prompt = buildPrompt({ platformKey: key, draft, web, voice });
+      const prompt = buildPrompt({ platformKey: key, draft, web, voice, performance });
       const text = await runGrok(prompt, { web });
       const data = extractJson(text);
       if (!data.platform) data.platform = PLATFORMS[key].name;
       if (voice) data.voice = voice.displayName || voice.name;
+      if (performance) data.performance = performance.displayName || performance.name;
       return json(res, 200, { result: data });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/performance") {
+      return json(res, 200, await listDatasets());
+    }
+    if (req.method === "GET" && url.pathname.startsWith("/api/performance/")) {
+      const name = decodeURIComponent(url.pathname.slice("/api/performance/".length));
+      try {
+        const d = await getDataset(name);
+        if (!d) return json(res, 404, { error: "Not found" });
+        // Don't ship every record back over the wire on list views — return summary + top 5.
+        return json(res, 200, {
+          ...d,
+          records: d.records,
+          top: topRecords(d, 5),
+        });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+    }
+    if (req.method === "POST" && url.pathname === "/api/performance") {
+      const body = await readBody(req);
+      let parsed;
+      try { parsed = JSON.parse(body || "{}"); } catch { return json(res, 400, { error: "Invalid JSON body." }); }
+      try {
+        const saved = await saveDataset(parsed);
+        return json(res, 200, saved);
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+    }
+    if (req.method === "DELETE" && url.pathname.startsWith("/api/performance/")) {
+      const name = decodeURIComponent(url.pathname.slice("/api/performance/".length));
+      try {
+        validatePerfName(name);
+        const ok = await deleteDataset(name);
+        return json(res, ok ? 200 : 404, { ok });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/api/voices") {
@@ -134,12 +197,14 @@ const server = createServer(async (req, res) => {
         try { voice = await getVoice(parsed.voice); } catch (e) { return json(res, 400, { error: e.message }); }
         if (!voice) return json(res, 400, { error: `Voice "${parsed.voice}" not found.` });
       }
+      const performance = await loadPerformanceFor(parsed.performance, key);
 
-      const prompt = buildRepurposePrompt({ platformKey: key, source, voice, web });
+      const prompt = buildRepurposePrompt({ platformKey: key, source, voice, web, performance });
       const text = await runGrok(prompt, { web });
       const data = extractJson(text);
       if (!data.platform) data.platform = PLATFORMS[key].name;
       if (voice) data.voice = voice.displayName || voice.name;
+      if (performance) data.performance = performance.displayName || performance.name;
       return json(res, 200, { result: data });
     }
 
