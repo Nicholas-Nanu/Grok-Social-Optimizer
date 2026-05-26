@@ -206,6 +206,45 @@
   .ridebox { background: #15233a; border: 1px solid #243352; border-radius: 10px; padding: 11px 14px; }
   .ridebox ul { margin: 0 0 0 18px; padding: 0; font-size: 14px; }
   .ridebox li { margin: 3px 0; }
+  .vlabel { color: var(--muted); font-size: 13px; }
+  select, input.vfield {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 7px 11px; font-size: 14px; font-family: inherit;
+  }
+  select:focus, input.vfield:focus, textarea.vfield:focus { outline: none; border-color: var(--accent); }
+  textarea.vfield {
+    width: 100%;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 12px; font-size: 14px; font-family: inherit; resize: vertical;
+  }
+  .ghost-btn {
+    background: transparent; color: var(--muted);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 6px 12px; font-size: 13px; cursor: pointer;
+  }
+  .ghost-btn:hover { color: var(--text); border-color: var(--accent); }
+  .vpanel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 16px; margin-top: 14px;
+  }
+  .vpanel h4 { margin: 14px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .vlist { display: flex; flex-direction: column; gap: 7px; }
+  .vitem {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px; font-size: 14px;
+  }
+  .vitem .vname { font-weight: 600; }
+  .vitem .vmeta { color: var(--muted); font-size: 12px; }
+  .vform { display: flex; flex-direction: column; gap: 8px; }
+  .vform .row2 { display: flex; gap: 8px; }
+  .vform .row2 input { flex: 1; }
+  .vform-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .vpanel .empty { color: var(--muted); font-size: 13px; padding: 6px 0; }
+  .danger { color: var(--red); border-color: #5a2420; }
+  .danger:hover { color: var(--red); border-color: var(--red); }
 </style>
 </head>
 <body>
@@ -221,6 +260,11 @@
   </div>
   <div class="composer">
     <textarea id="draft" placeholder="Paste your draft post here…"></textarea>
+    <div class="row" id="voicerow">
+      <span class="vlabel">Voice</span>
+      <select id="voiceSelect"><option value="">(no voice)</option></select>
+      <button class="ghost-btn" id="voiceManage" type="button">Manage</button>
+    </div>
     <div class="row">
       <div class="platforms" id="platforms"></div>
       <div class="grow"></div>
@@ -230,6 +274,24 @@
       <span class="charcount" id="charcount">0 characters</span>
       <div class="grow"></div>
       <button class="go" id="go">Optimize</button>
+    </div>
+  </div>
+
+  <div class="vpanel hidden" id="voicePanel">
+    <h4>Your voice profiles</h4>
+    <div class="vlist" id="voiceList"><span class="empty">No voices saved yet.</span></div>
+    <h4 id="vformTitle">Create voice</h4>
+    <div class="vform">
+      <div class="row2">
+        <input class="vfield" id="vname" placeholder="name (lowercase-dashes, e.g. nick-personal)" />
+        <input class="vfield" id="vdisplay" placeholder="Display name (e.g. Nick — personal)" />
+      </div>
+      <textarea class="vfield" id="vpersona" rows="2" placeholder="Persona note (optional): casual, opinionated, ex-engineer; lowercase; avoids corporate speak…"></textarea>
+      <textarea class="vfield" id="vsamples" rows="8" placeholder="Paste your best past posts here. Separate posts with a blank line."></textarea>
+      <div class="vform-actions">
+        <button class="ghost-btn" id="vcancel" type="button">Cancel</button>
+        <button class="go" id="vsave" type="button" style="padding:8px 18px;font-size:13px">Save voice</button>
+      </div>
     </div>
   </div>
 
@@ -368,12 +430,12 @@ function renderTrendBrief(r) {
     </div>`;
 }
 
-async function optimizeOne(card, key, draft, web, timer) {
+async function optimizeOne(card, key, draft, web, timer, voice) {
   try {
     const r = await fetch("/api/optimize", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ draft, platform: key, web }),
+      body: JSON.stringify({ draft, platform: key, web, voice: voice || undefined }),
     });
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
@@ -437,6 +499,8 @@ function setMode(m) {
   $("go").textContent = c.button;
   $("weblabel").classList.toggle("hidden", m === "trends");
   $("charcount").classList.toggle("hidden", m === "trends");
+  $("voicerow").classList.toggle("hidden", m === "trends");
+  if (m === "trends") $("voicePanel").classList.add("hidden");
   $("results").innerHTML = "";
 }
 
@@ -446,6 +510,7 @@ $("tab-trends").addEventListener("click", () => setMode("trends"));
 $("go").addEventListener("click", async () => {
   const text = $("draft").value.trim();
   const web = $("web").checked;
+  const voice = $("voiceSelect").value;
   const keys = [...selected];
   if (!text) { $("draft").focus(); return; }
   if (!keys.length) { alert("Pick at least one platform."); return; }
@@ -471,12 +536,118 @@ $("go").addEventListener("click", async () => {
   await Promise.all(cards.map(({ key, div, timer }) =>
     mode === "trends"
       ? trendsOne(div, key, text, timer)
-      : optimizeOne(div, key, text, web, timer)
+      : optimizeOne(div, key, text, web, timer, voice)
   ));
   $("go").disabled = false;
 });
 
+// ── Voice profiles ───────────────────────────────────────────────────────
+async function loadVoices() {
+  let list = [];
+  try {
+    const r = await fetch("/api/voices");
+    if (r.ok) list = await r.json();
+  } catch {}
+  const current = $("voiceSelect").value;
+  $("voiceSelect").innerHTML =
+    `<option value="">(no voice)</option>` +
+    list.map((v) => `<option value="${esc(v.name)}">${esc(v.displayName || v.name)}</option>`).join("");
+  if (current && list.find((v) => v.name === current)) $("voiceSelect").value = current;
+  renderVoiceList(list);
+}
+
+function renderVoiceList(list) {
+  const el = $("voiceList");
+  if (!list.length) { el.innerHTML = `<span class="empty">No voices saved yet.</span>`; return; }
+  el.innerHTML = list.map((v) => `
+    <div class="vitem">
+      <span class="vname">${esc(v.displayName || v.name)}</span>
+      <span class="vmeta">${v.sampleCount} sample${v.sampleCount === 1 ? "" : "s"}</span>
+      <span class="grow"></span>
+      <button class="ghost-btn" data-edit="${esc(v.name)}" type="button">Edit</button>
+      <button class="ghost-btn danger" data-del="${esc(v.name)}" type="button">Delete</button>
+    </div>`).join("");
+  el.querySelectorAll("[data-edit]").forEach((b) =>
+    b.addEventListener("click", () => editVoice(b.dataset.edit)));
+  el.querySelectorAll("[data-del]").forEach((b) =>
+    b.addEventListener("click", () => removeVoice(b.dataset.del)));
+}
+
+function clearForm() {
+  $("vname").value = ""; $("vname").disabled = false;
+  $("vdisplay").value = "";
+  $("vpersona").value = "";
+  $("vsamples").value = "";
+  $("vformTitle").textContent = "Create voice";
+}
+
+async function editVoice(name) {
+  const r = await fetch("/api/voices/" + encodeURIComponent(name));
+  if (!r.ok) { alert("Could not load voice."); return; }
+  const v = await r.json();
+  $("vname").value = v.name; $("vname").disabled = true;
+  $("vdisplay").value = v.displayName || "";
+  $("vpersona").value = v.persona || "";
+  $("vsamples").value = (v.samples || []).join("\n\n");
+  $("vformTitle").textContent = "Edit voice: " + (v.displayName || v.name);
+  $("voicePanel").classList.remove("hidden");
+  $("vname").scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+async function removeVoice(name) {
+  if (!confirm(`Delete voice "${name}"?`)) return;
+  const r = await fetch("/api/voices/" + encodeURIComponent(name), { method: "DELETE" });
+  if (!r.ok) { alert("Delete failed."); return; }
+  if ($("voiceSelect").value === name) $("voiceSelect").value = "";
+  await loadVoices();
+  if ($("vname").value === name) clearForm();
+}
+
+$("voiceManage").addEventListener("click", () => {
+  const p = $("voicePanel");
+  p.classList.toggle("hidden");
+  if (!p.classList.contains("hidden")) clearForm();
+});
+$("vcancel").addEventListener("click", () => { clearForm(); $("voicePanel").classList.add("hidden"); });
+
+$("vsave").addEventListener("click", async () => {
+  const name = $("vname").value.trim();
+  if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) {
+    alert("Name must be lowercase letters, digits, and dashes (max 41 chars), and start with a letter or digit.");
+    return;
+  }
+  const samples = $("vsamples").value
+    .split(/\n\s*\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  $("vsave").disabled = true;
+  try {
+    const r = await fetch("/api/voices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        displayName: $("vdisplay").value.trim() || name,
+        persona: $("vpersona").value.trim(),
+        samples,
+      }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    await loadVoices();
+    $("voiceSelect").value = name;
+    clearForm();
+    $("voicePanel").classList.add("hidden");
+  } catch (e) {
+    alert("Save failed: " + e.message);
+  } finally {
+    $("vsave").disabled = false;
+  }
+});
+
 loadPlatforms();
+loadVoices();
 </script>
 </body>
 </html>

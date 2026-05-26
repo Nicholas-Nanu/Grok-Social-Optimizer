@@ -1,7 +1,7 @@
 import { PLATFORMS } from "./platforms.js";
 
 // Builds a single-shot prompt instructing Grok to return strict JSON for one platform.
-export function buildPrompt({ platformKey, draft, web }) {
+export function buildPrompt({ platformKey, draft, web, voice }) {
   const p = PLATFORMS[platformKey];
   const algoLines = p.algo.map((l) => `- ${l}`).join("\n");
 
@@ -11,6 +11,8 @@ export function buildPrompt({ platformKey, draft, web }) {
     ? `LIVE TREND GROUNDING (today is ${today}): Use web and X/Twitter search to find what is trending RIGHT NOW on ${p.name} relevant to this post's topic — current hashtags, formats, sounds, phrases, and conversations. Ground your hashtags and timing in that live data, make at least one rewrite ride a current trend, and fill the "trends" field. Prefer recent, real signals over generic evergreen advice.`
     : `Do not use any tools. Rely on your own knowledge. Set "trends" to null.`;
 
+  const voiceBlock = buildVoiceBlock(voice);
+
   return `You are an expert social media growth strategist optimizing a post for the ${p.name} algorithm.
 
 ${p.name} algorithm facts to optimize for:
@@ -19,6 +21,7 @@ ${algoLines}
 Constraints: ${p.limit}
 Hashtag guidance: ${p.hashtagGuidance}
 ${webNote}
+${voiceBlock}
 
 The user's draft post:
 """
@@ -44,7 +47,22 @@ Analyze and optimize this draft. Respond with ONLY a single valid JSON object (n
   "notes": "<one or two sentences of extra advice>"
 }
 
-Provide exactly 3 rewrites (distinct styles), 4 hooks, and hashtags per the guidance above. Keep all post text within the platform character limit. Output JSON only.`;
+Provide exactly 3 rewrites (distinct styles), 4 hooks, and hashtags per the guidance above. Keep all post text within the platform character limit.${voice ? " Every rewrite and hook MUST match the voice profile above — same tone, vocabulary, rhythm, and quirks. If the voice conflicts with a generic algorithm best practice, favor the voice (authentic > polished)." : ""} Output JSON only.`;
+}
+
+// Build a "VOICE PROFILE" block to inject into the prompt when a voice is selected.
+// Sends the persona note + up to 8 reference posts so the model can mimic style.
+function buildVoiceBlock(voice) {
+  if (!voice || (!voice.persona && !(voice.samples && voice.samples.length))) return "";
+  const persona = voice.persona ? `Persona: ${voice.persona}` : "";
+  const samples = (voice.samples || [])
+    .slice(0, 8)
+    .map((s) => `"""\n${s}\n"""`)
+    .join("\n");
+  const samplesBlock = samples
+    ? `Reference posts in this voice (mimic the tone, vocabulary, sentence rhythm, and any quirks — do NOT invent unrelated facts about this person):\n${samples}`
+    : "";
+  return `\nVOICE PROFILE — write rewrites and hooks in this person's voice:\n${persona}\n${samplesBlock}\n`;
 }
 
 // Builds a single-shot prompt for a standalone Trend Brief: what's hot right now

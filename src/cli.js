@@ -5,6 +5,7 @@ import { PLATFORMS, resolvePlatform } from "./platforms.js";
 import { buildPrompt, buildTrendPrompt } from "./prompt.js";
 import { runGrok, extractJson } from "./grok.js";
 import { renderReport, renderTrendBrief, log } from "./render.js";
+import { getVoice } from "./voices.js";
 
 const HELP = `
 optimize — tune a social post for the platform algorithm using Grok
@@ -20,6 +21,7 @@ Options:
   -f, --file <path>      Read the draft (or topic) from a file
   -w, --web              Let Grok pull live trends and ground the post in them (slower)
       --trends           Trend Brief mode: what's hot now for a topic (implies --web)
+  -v, --voice <name>     Apply a saved voice profile (manage via the web UI)
   -m, --model <id>       Override the Grok model
   -e, --effort <level>   Grok effort: low|medium|high|xhigh|max (only works with
                          models that support it; the default model does not)
@@ -48,6 +50,7 @@ async function main() {
         file: { type: "string", short: "f" },
         web: { type: "boolean", short: "w", default: false },
         trends: { type: "boolean", default: false },
+        voice: { type: "string", short: "v" },
         model: { type: "string", short: "m" },
         effort: { type: "string", short: "e" },
         json: { type: "boolean", default: false },
@@ -104,17 +107,33 @@ async function main() {
     if (!platformKeys.includes(key)) platformKeys.push(key);
   }
 
+  // Voice profile (optimize mode only).
+  let voice = null;
+  if (values.voice && !values.trends) {
+    try {
+      voice = await getVoice(values.voice);
+    } catch (e) {
+      log.error(e.message);
+      process.exit(1);
+    }
+    if (!voice) {
+      log.error(`Voice profile "${values.voice}" not found. Manage profiles in the web UI.`);
+      process.exit(1);
+    }
+  }
+
   const names = platformKeys.map((k) => PLATFORMS[k].name).join(", ");
+  const voiceSuffix = voice ? ` in voice "${voice.displayName || voice.name}"` : "";
   log.info(
     values.trends
       ? `Finding live trends on ${names} via Grok…`
-      : `Optimizing for ${names} via Grok…`
+      : `Optimizing for ${names}${voiceSuffix} via Grok…`
   );
 
   const tasks = platformKeys.map(async (platformKey) => {
     const prompt = values.trends
       ? buildTrendPrompt({ platformKey, topic: draft })
-      : buildPrompt({ platformKey, draft, web: values.web });
+      : buildPrompt({ platformKey, draft, web: values.web, voice });
     const text = await runGrok(prompt, {
       web: values.trends || values.web,
       model: values.model,

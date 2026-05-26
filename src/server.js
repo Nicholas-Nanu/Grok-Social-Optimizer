@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import { PLATFORMS, resolvePlatform } from "./platforms.js";
 import { buildPrompt, buildTrendPrompt } from "./prompt.js";
 import { runGrok, extractJson } from "./grok.js";
+import { listVoices, getVoice, saveVoice, deleteVoice, validateName } from "./voices.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(__dirname, "..", "public");
@@ -65,11 +66,57 @@ const server = createServer(async (req, res) => {
       if (!draft) return json(res, 400, { error: "Missing draft text." });
       if (!key) return json(res, 400, { error: `Unknown platform "${parsed.platform}".` });
 
-      const prompt = buildPrompt({ platformKey: key, draft, web });
+      let voice = null;
+      if (parsed.voice) {
+        try {
+          voice = await getVoice(parsed.voice);
+        } catch (e) {
+          return json(res, 400, { error: e.message });
+        }
+        if (!voice) return json(res, 400, { error: `Voice "${parsed.voice}" not found.` });
+      }
+
+      const prompt = buildPrompt({ platformKey: key, draft, web, voice });
       const text = await runGrok(prompt, { web });
       const data = extractJson(text);
       if (!data.platform) data.platform = PLATFORMS[key].name;
+      if (voice) data.voice = voice.displayName || voice.name;
       return json(res, 200, { result: data });
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/voices") {
+      return json(res, 200, await listVoices());
+    }
+    if (req.method === "GET" && url.pathname.startsWith("/api/voices/")) {
+      const name = decodeURIComponent(url.pathname.slice("/api/voices/".length));
+      try {
+        const v = await getVoice(name);
+        if (!v) return json(res, 404, { error: "Not found" });
+        return json(res, 200, v);
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+    }
+    if (req.method === "POST" && url.pathname === "/api/voices") {
+      const body = await readBody(req);
+      let parsed;
+      try { parsed = JSON.parse(body || "{}"); } catch { return json(res, 400, { error: "Invalid JSON body." }); }
+      try {
+        const saved = await saveVoice(parsed);
+        return json(res, 200, saved);
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+    }
+    if (req.method === "DELETE" && url.pathname.startsWith("/api/voices/")) {
+      const name = decodeURIComponent(url.pathname.slice("/api/voices/".length));
+      try {
+        validateName(name);
+        const ok = await deleteVoice(name);
+        return json(res, ok ? 200 : 404, { ok });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
     }
 
     if (req.method === "POST" && url.pathname === "/api/trends") {
