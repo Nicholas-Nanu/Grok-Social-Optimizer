@@ -95,6 +95,20 @@ export const PLATFORMS = {
     ],
     hashtagGuidance: "0-1 topic tag (Threads supports one topic tag, not hashtag spam).",
   },
+  bluesky: {
+    name: "Bluesky",
+    limit: "300 characters per post (threads supported via reply chains).",
+    algo: [
+      "Default feed is reverse-chronological — the Discover feed and community 'custom feeds' are where algorithmic reach lives.",
+      "Custom feeds curate by tag/keyword — 1-3 specific tags help your post surface in the right niche feeds.",
+      "Early engagement velocity (likes + reposts in the first hour) drives the Discover feed.",
+      "Replies and quote-posts amplify reach and keep posts visible; ask a real question.",
+      "Audience leans tech/journalism/academic — witty, substantive, conversational beats marketing speak.",
+      "Outbound links are NOT suppressed (unlike X) — link freely, but the idea should still stand alone.",
+      "Image and video posts outperform text-only in most custom feeds; alt text matters for accessibility-focused community.",
+    ],
+    hashtagGuidance: "1-3 specific topic tags (used to target custom feeds, not for discovery spam).",
+  },
 };
 
 export const PLATFORM_ALIASES = {
@@ -114,6 +128,8 @@ export const PLATFORM_ALIASES = {
   ytshorts: "youtube-shorts",
   yts: "youtube-shorts",
   threads: "threads",
+  bluesky: "bluesky",
+  bsky: "bluesky",
 };
 
 export function resolvePlatform(input) {
