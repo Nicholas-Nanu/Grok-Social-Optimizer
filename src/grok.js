@@ -70,13 +70,31 @@ export function runGrok(prompt, { web = false, model, effort } = {}) {
 }
 
 // Extract a JSON object from model text that may contain stray prose or code fences.
+// On failure, throws an Error with `.raw` (full response) and `.snippet` (first 600 chars)
+// attached so callers can surface what actually came back.
 export function extractJson(text) {
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
   const candidate = fenced ? fenced[1] : text;
   const start = candidate.indexOf("{");
   const end = candidate.lastIndexOf("}");
+  const snippet = String(text || "").trim().slice(0, 600);
+
   if (start === -1 || end === -1 || end < start) {
-    throw new Error("No JSON object found in Grok response.");
+    const e = new Error(
+      `Grok returned no JSON object. It responded with prose or a refusal instead.\nFirst 600 chars:\n${snippet || "(empty)"}`
+    );
+    e.raw = text;
+    e.snippet = snippet;
+    throw e;
   }
-  return JSON.parse(candidate.slice(start, end + 1));
+  try {
+    return JSON.parse(candidate.slice(start, end + 1));
+  } catch (parseErr) {
+    const e = new Error(
+      `Grok returned text that started like JSON but didn't parse: ${parseErr.message}\nFirst 600 chars:\n${snippet}`
+    );
+    e.raw = text;
+    e.snippet = snippet;
+    throw e;
+  }
 }
