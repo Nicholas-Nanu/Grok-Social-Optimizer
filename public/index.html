@@ -286,7 +286,26 @@
   <div class="vpanel hidden" id="voicePanel">
     <h4>Your voice profiles</h4>
     <div class="vlist" id="voiceList"><span class="empty">No voices saved yet.</span></div>
-    <h4 id="vformTitle">Create voice</h4>
+    <h4>Import from URL <span class="asof">· auto-build from your recent posts</span></h4>
+    <p class="muted" style="margin:0 0 8px;font-size:13px">Paste a Bluesky handle (e.g. <code>jay.bsky.team</code>) or an X handle (e.g. <code>@nicholasmartin</code>). Grok analyzes your posts and writes the persona for you.</p>
+    <div class="vform">
+      <div class="row2">
+        <input class="vfield" id="vimpHandle" placeholder="handle or profile URL" />
+        <select id="vimpPlatform" class="vfield" style="max-width:160px">
+          <option value="bluesky">Bluesky</option>
+          <option value="x">X (Twitter)</option>
+        </select>
+      </div>
+      <div class="row2">
+        <input class="vfield" id="vimpName" placeholder="save as (e.g. nick-bsky)" />
+        <input class="vfield" id="vimpDisplay" placeholder="Display name (optional)" />
+      </div>
+      <div class="vform-actions">
+        <button class="go" id="vimpGo" type="button" style="padding:8px 18px;font-size:13px">Fetch &amp; build voice</button>
+      </div>
+      <p class="muted" id="vimpStatus" style="margin:0;font-size:13px"></p>
+    </div>
+    <h4 id="vformTitle">Or create manually</h4>
     <div class="vform">
       <div class="row2">
         <input class="vfield" id="vname" placeholder="name (lowercase-dashes, e.g. nick-personal)" />
@@ -304,7 +323,26 @@
   <div class="vpanel hidden" id="perfPanel">
     <h4>Your performance datasets</h4>
     <div class="vlist" id="perfList"><span class="empty">No datasets imported yet.</span></div>
-    <h4>Import dataset from CSV</h4>
+    <h4>Import from URL <span class="asof">· auto-fetch with real engagement</span></h4>
+    <p class="muted" style="margin:0 0 8px;font-size:13px">Paste a Bluesky or X handle. Bluesky returns real likes/reposts/replies from its public API; X uses Grok to fetch (metrics may be approximate).</p>
+    <div class="vform">
+      <div class="row2">
+        <input class="vfield" id="pimpHandle" placeholder="handle or profile URL" />
+        <select id="pimpPlatform" class="vfield" style="max-width:160px">
+          <option value="bluesky">Bluesky</option>
+          <option value="x">X (Twitter)</option>
+        </select>
+      </div>
+      <div class="row2">
+        <input class="vfield" id="pimpName" placeholder="save as (e.g. nick-bsky-perf)" />
+        <input class="vfield" id="pimpDisplay" placeholder="Display name (optional)" />
+      </div>
+      <div class="vform-actions">
+        <button class="go" id="pimpGo" type="button" style="padding:8px 18px;font-size:13px">Fetch &amp; save</button>
+      </div>
+      <p class="muted" id="pimpStatus" style="margin:0;font-size:13px"></p>
+    </div>
+    <h4>Or import dataset from CSV</h4>
     <p class="muted" style="margin:0 0 8px;font-size:13px">CSV needs a header row plus one column with the post text (any of: post, text, caption, content). Numeric columns (likes, comments, shares, saves, views) are summed into a composite engagement score — or include a "score" column to override.</p>
     <div class="vform">
       <div class="row2">
@@ -831,6 +869,82 @@ $("psave").addEventListener("click", async () => {
     alert("Import failed: " + e.message);
   } finally {
     $("psave").disabled = false;
+  }
+});
+
+// ── Auto-ingest from URL ─────────────────────────────────────────────────
+function setImportStatus(el, msg, isErr) {
+  el.textContent = msg;
+  el.style.color = isErr ? "var(--red)" : "var(--muted)";
+}
+
+$("vimpGo").addEventListener("click", async () => {
+  const handle = $("vimpHandle").value.trim();
+  const platform = $("vimpPlatform").value;
+  const name = $("vimpName").value.trim();
+  const displayName = $("vimpDisplay").value.trim();
+  const status = $("vimpStatus");
+  if (!handle) { setImportStatus(status, "Enter a handle first.", true); return; }
+  if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) {
+    setImportStatus(status, "Save-as name must be lowercase letters, digits, and dashes.", true);
+    return;
+  }
+  $("vimpGo").disabled = true;
+  setImportStatus(status,
+    platform === "x"
+      ? `Asking Grok to fetch posts from @${handle} on X — this takes 30-60s…`
+      : `Fetching posts from @${handle} on Bluesky…`);
+  try {
+    const r = await fetch("/api/ingest/voice", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle, platform, name, displayName }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    setImportStatus(status, `Saved voice "${data.saved.displayName}" with ${data.samplesPicked} samples (from ${data.fetched} fetched posts).`);
+    await loadVoices();
+    $("voiceSelect").value = name;
+    $("vimpHandle").value = ""; $("vimpName").value = ""; $("vimpDisplay").value = "";
+  } catch (e) {
+    setImportStatus(status, "Import failed: " + e.message, true);
+  } finally {
+    $("vimpGo").disabled = false;
+  }
+});
+
+$("pimpGo").addEventListener("click", async () => {
+  const handle = $("pimpHandle").value.trim();
+  const platform = $("pimpPlatform").value;
+  const name = $("pimpName").value.trim();
+  const displayName = $("pimpDisplay").value.trim();
+  const status = $("pimpStatus");
+  if (!handle) { setImportStatus(status, "Enter a handle first.", true); return; }
+  if (!/^[a-z0-9][a-z0-9-]{0,40}$/.test(name)) {
+    setImportStatus(status, "Save-as name must be lowercase letters, digits, and dashes.", true);
+    return;
+  }
+  $("pimpGo").disabled = true;
+  setImportStatus(status,
+    platform === "x"
+      ? `Asking Grok to fetch posts from @${handle} on X — this takes 30-60s…`
+      : `Fetching posts from @${handle} on Bluesky…`);
+  try {
+    const r = await fetch("/api/ingest/performance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle, platform, name, displayName }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    setImportStatus(status, `Saved dataset with ${data.saved.recordCount} records (score: ${data.saved.scoreLabel}).`);
+    await loadPerformanceDatasets();
+    $("perfSelect").value = name;
+    $("pimpHandle").value = ""; $("pimpName").value = ""; $("pimpDisplay").value = "";
+  } catch (e) {
+    setImportStatus(status, "Import failed: " + e.message, true);
+  } finally {
+    $("pimpGo").disabled = false;
   }
 });
 

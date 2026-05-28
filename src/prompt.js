@@ -157,6 +157,32 @@ Respond with ONLY a single valid JSON object (no markdown, no code fences, no co
 Provide exactly 2 alternates with distinctly different angles (not just length variants). Keep all post text within the platform character limit.${voice ? " Every output MUST match the voice profile above — same tone, vocabulary, rhythm, and quirks. Favor voice authenticity over generic polish." : ""}${performance ? " The performance benchmarks above show what actually works for THIS account; mimic the patterns of the top performers." : ""} Output JSON only.`;
 }
 
+// Given a batch of someone's recent posts, ask Grok to extract a persona
+// description and pick the best representative samples for a voice profile.
+// Used by the auto-ingest feature.
+export function buildPersonaPrompt({ handle, platformName, posts }) {
+  const numbered = posts
+    .map((p, i) => `${i + 1}. "${String(p.text).replace(/\n+/g, " ").slice(0, 500)}"`)
+    .join("\n");
+
+  return `You are a brand-voice analyst. Below are recent posts by @${handle} on ${platformName}. Read them, then:
+
+1. Write a 1-2 sentence "persona" describing this person's distinctive voice — tone, vocabulary, recurring themes, sentence rhythm, quirks. Be specific (not "casual and engaging" — actually name the pattern).
+2. Pick 8-12 numbered posts that BEST represent this voice (skip generic announcements, links-only posts, or anything that doesn't show the voice). Prefer variety across topics.
+
+Posts:
+${numbered}
+
+Respond with ONLY a single valid JSON object (no markdown, no code fences, no commentary):
+
+{
+  "persona": "<1-2 sentence persona description, specific and concrete>",
+  "sampleIndexes": [<numbers from the list above>]
+}
+
+Output JSON only.`;
+}
+
 // Build a "PERFORMANCE BENCHMARKS" block from the user's measured top posts.
 // Grounds the model in what actually works for THIS account vs. generic advice.
 function buildPerformanceBlock(performance) {

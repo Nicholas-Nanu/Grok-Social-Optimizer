@@ -4,7 +4,8 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { PLATFORMS, resolvePlatform } from "./platforms.js";
-import { buildPrompt, buildTrendPrompt, buildRepurposePrompt } from "./prompt.js";
+import { buildPrompt, buildTrendPrompt, buildRepurposePrompt, buildPersonaPrompt } from "./prompt.js";
+import { fetchPostsFor, compositeScore } from "./ingest.js";
 import { runGrok, extractJson } from "./grok.js";
 import { listVoices, getVoice, saveVoice, deleteVoice, validateName } from "./voices.js";
 import {
@@ -105,6 +106,83 @@ const server = createServer(async (req, res) => {
       if (voice) data.voice = voice.displayName || voice.name;
       if (performance) data.performance = performance.displayName || performance.name;
       return json(res, 200, { result: data });
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/ingest/voice") {
+      const body = await readBody(req);
+      let parsed;
+      try { parsed = JSON.parse(body || "{}"); } catch { return json(res, 400, { error: "Invalid JSON body." }); }
+      const platformKey = resolvePlatform(parsed.platform || "");
+      if (!platformKey) return json(res, 400, { error: `Unknown platform "${parsed.platform}".` });
+      if (!parsed.handle) return json(res, 400, { error: "Missing handle." });
+      if (!parsed.name) return json(res, 400, { error: "Missing voice name." });
+      try {
+        const { posts, handle } = await fetchPostsFor(platformKey, parsed.handle);
+        if (!posts.length) return json(res, 400, { error: `No public posts found for @${handle}.` });
+
+        // Ask Grok to pick representative samples and write the persona.
+        const personaPrompt = buildPersonaPrompt({
+          handle, platformName: PLATFORMS[platformKey].name, posts,
+        });
+        const personaText = await runGrok(personaPrompt, { web: false });
+        const analysis = extractJson(personaText);
+        const idxs = Array.isArray(analysis.sampleIndexes) ? analysis.sampleIndexes : [];
+        const samples = idxs
+          .map((i) => posts[Number(i) - 1]?.text)
+          .filter(Boolean)
+          .slice(0, 12);
+        // Fallback: if Grok returned no usable indexes, use the top-by-engagement posts.
+        const finalSamples = samples.length
+          ? samples
+          : [...posts].sort((a, b) => compositeScore(b) - compositeScore(a)).slice(0, 10).map((p) => p.text);
+
+        const saved = await saveVoice({
+          name: parsed.name,
+          displayName: parsed.displayName || `@${handle} (${platformKey})`,
+          persona: String(analysis.persona || "").trim(),
+          samples: finalSamples,
+        });
+        return json(res, 200, {
+          saved,
+          fetched: posts.length,
+          samplesPicked: finalSamples.length,
+          handle,
+        });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/ingest/performance") {
+      const body = await readBody(req);
+      let parsed;
+      try { parsed = JSON.parse(body || "{}"); } catch { return json(res, 400, { error: "Invalid JSON body." }); }
+      const platformKey = resolvePlatform(parsed.platform || "");
+      if (!platformKey) return json(res, 400, { error: `Unknown platform "${parsed.platform}".` });
+      if (!parsed.handle) return json(res, 400, { error: "Missing handle." });
+      if (!parsed.name) return json(res, 400, { error: "Missing dataset name." });
+      try {
+        const { posts, handle } = await fetchPostsFor(platformKey, parsed.handle);
+        if (!posts.length) return json(res, 400, { error: `No public posts found for @${handle}.` });
+
+        // Build a CSV string from the fetched posts and reuse saveDataset's CSV pipeline,
+        // which gives us the same auto-detection + scoreLabel as manual import.
+        const lines = ["post,likes,reposts,replies"];
+        for (const p of posts) {
+          const cell = `"${String(p.text).replace(/"/g, '""')}"`;
+          lines.push(`${cell},${p.likes ?? 0},${p.reposts ?? 0},${p.replies ?? 0}`);
+        }
+        const csv = lines.join("\n");
+        const saved = await saveDataset({
+          name: parsed.name,
+          displayName: parsed.displayName || `@${handle} (${platformKey})`,
+          platform: platformKey,
+          csv,
+        });
+        return json(res, 200, { saved, fetched: posts.length, handle });
+      } catch (e) {
+        return json(res, 400, { error: e.message });
+      }
     }
 
     if (req.method === "GET" && url.pathname === "/api/performance") {
