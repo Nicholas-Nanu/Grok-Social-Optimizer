@@ -194,6 +194,39 @@ export function renderRepurpose(r) {
   return out.join("\n");
 }
 
+const ARCHETYPE_COLOR = {
+  "hot take": red,
+  "question": cyan,
+  "tip": green,
+  "story": magenta,
+  "listicle": yellow,
+  "contrarian": red,
+  "recap": cyan,
+};
+
+export function renderPlan(r) {
+  const out = [];
+  out.push("");
+  out.push(cyan(bold(`  ${r.platform || "Plan"}`)) + (r.startDate ? dim(`  · starting ${r.startDate}`) : ""));
+  if (r.theme) out.push(`  ${dim("theme:")} ${r.theme}`);
+  out.push("");
+
+  const days = Array.isArray(r.days) ? r.days : [];
+  for (const d of days) {
+    const arch = ARCHETYPE_COLOR[String(d.archetype || "").toLowerCase()] || dim;
+    const badge = d.archetype ? arch(`[${String(d.archetype).toUpperCase()}]`) : "";
+    out.push(rule(`${d.day || ""} (day ${d.dayIndex ?? ""})`));
+    out.push(`  ${badge}${d.bestTime ? "  " + dim("best: " + d.bestTime) : ""}`);
+    out.push(indent(d.post || ""));
+    if (Array.isArray(d.hashtags) && d.hashtags.length) {
+      out.push("  " + cyan(d.hashtags.join("  ")));
+    }
+    out.push("");
+  }
+
+  return out.join("\n");
+}
+
 export const log = {
   info: (s) => process.stderr.write(dim(s) + "\n"),
   error: (s) => process.stderr.write(red("Error: ") + s + "\n"),

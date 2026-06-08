@@ -8,7 +8,7 @@ export function buildPrompt({ platformKey, draft, web, voice, performance }) {
   const today = new Date().toISOString().slice(0, 10);
 
   const webNote = web
-    ? `LIVE TREND GROUNDING (today is ${today}): Use web and X/Twitter search to find what is trending RIGHT NOW on ${p.name} relevant to this post's topic — current hashtags, formats, sounds, phrases, and conversations. Ground your hashtags and timing in that live data, make at least one rewrite ride a current trend, and fill the "trends" field. Prefer recent, real signals over generic evergreen advice.`
+    ? `LIVE TREND GROUNDING (today is ${today}): Use web and X/Twitter search to find what is trending RIGHT NOW on ${p.name} relevant to this post's topic — current hashtags, formats, sounds, phrases, and conversations. Ground your hashtags and timing in that live data, make at least one rewrite ride a current trend, and fill the "trends" field. Prefer recent, real signals over generic evergreen advice. SEARCH RULES: do NOT pass an "allowed_domains" parameter to web_search (5-domain cap, your calls will fail); issue broad searches. Keep total tool calls under ~10 and always produce the final JSON.`
     : `Do not use any tools. Rely on your own knowledge. Set "trends" to null.`;
 
   const voiceBlock = buildVoiceBlock(voice);
@@ -75,6 +75,11 @@ export function buildTrendPrompt({ platformKey, topic }) {
   return `You are a social media trend analyst with live access to web and X/Twitter data. Today is ${today}.
 
 Use web and X/Twitter search to identify what is ACTUALLY trending RIGHT NOW (this week) on ${p.name} for the topic/niche below. Base everything on current, real signals — not generic evergreen advice. If you cannot verify something is current, do not include it.
+
+SEARCH TOOL RULES — IMPORTANT:
+- Do NOT pass an "allowed_domains" parameter to web_search (the API caps it at 5 domains and your calls will fail). Issue broad, unconstrained web_search queries instead.
+- Keep your total tool calls to under ~15. Be efficient: one or two well-chosen broad searches usually beat many narrow ones.
+- After your searches, your FINAL output MUST be the JSON object below — do not stop without producing it.
 
 Topic / niche:
 """
@@ -155,6 +160,66 @@ Respond with ONLY a single valid JSON object (no markdown, no code fences, no co
 }
 
 Provide exactly 2 alternates with distinctly different angles (not just length variants). Keep all post text within the platform character limit.${voice ? " Every output MUST match the voice profile above — same tone, vocabulary, rhythm, and quirks. Favor voice authenticity over generic polish." : ""}${performance ? " The performance benchmarks above show what actually works for THIS account; mimic the patterns of the top performers." : ""} Output JSON only.`;
+}
+
+// Plan a full week of posts for one platform on a topic. Returns one JSON
+// object with 7 day-entries, varied across archetypes so the week reads as
+// a coherent series, not 7 of the same post. Voice / performance / web all
+// compose in the usual way.
+export function buildPlanPrompt({ platformKey, topic, voice, performance, web, startDate }) {
+  const p = PLATFORMS[platformKey];
+  const algoLines = p.algo.map((l) => `- ${l}`).join("\n");
+  const today = startDate || new Date().toISOString().slice(0, 10);
+
+  const webNote = web
+    ? `LIVE TREND GROUNDING (today is ${today}): you may use web/X search to ground at least one post in a current ${p.name} trend. SEARCH RULES: do NOT pass an "allowed_domains" parameter (5-domain cap); broad searches only; keep tool calls under ~6 across the whole week.`
+    : `Do not use any tools. Rely on your own knowledge.`;
+
+  const voiceBlock = buildVoiceBlock(voice);
+  const perfBlock = buildPerformanceBlock(performance);
+
+  return `You are a social media content planner. Design ONE WEEK of posts for ${p.name} on the topic below — seven posts, one per day, that the user can publish daily.
+
+${p.name} algorithm facts to optimize for:
+${algoLines}
+
+Constraints: ${p.limit}
+Hashtag guidance: ${p.hashtagGuidance}
+${webNote}
+${voiceBlock}${perfBlock}
+
+Topic / pillar for the week:
+"""
+${topic}
+"""
+
+PLANNING PRINCIPLES (critical):
+- Pick a single throughline for the week, then explore it from seven different angles. Each post stands alone, but the seven together feel like one creator's voice riffing on one idea.
+- VARY THE ARCHETYPE every day. Use a mix from: hot take, audience question, tip/how-to, story/personal anecdote, listicle/threadable, contrarian take, recap/insight. Do NOT repeat an archetype in consecutive days.
+- Each post within the platform's character limit. Self-contained, not "1/7" sequential threading.
+- Hashtags should rotate — don't paste the same 3 tags on all 7 days. Pull from the platform's guidance.
+- Suggest a best posting-time window per day (day-of-week + time band, with timezone caveat).
+- If voice/performance blocks are present, match the voice and mimic top-performer patterns.
+
+Respond with ONLY a single JSON object (no markdown, no commentary):
+
+{
+  "platform": "${p.name}",
+  "theme": "<one sentence: the week's throughline>",
+  "startDate": "${today}",
+  "days": [
+    {
+      "day": "<Mon|Tue|Wed|Thu|Fri|Sat|Sun>",
+      "dayIndex": <1-7>,
+      "archetype": "<hot take | question | tip | story | listicle | contrarian | recap>",
+      "post": "<full post text, within ${p.limit.split(';')[0]}, self-contained>",
+      "hashtags": ["#tag", "..."],
+      "bestTime": "<e.g. 'Mon 8-10am local'>"
+    }
+  ]
+}
+
+Provide exactly 7 day-entries, in order, starting from today (${today}). Output JSON only.`;
 }
 
 // Given a batch of someone's recent posts, ask Grok to extract a persona

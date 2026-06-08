@@ -203,6 +203,19 @@
   .formats { display: flex; flex-wrap: wrap; gap: 8px; }
   .format { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 5px 11px; font-size: 13px; }
   .asof { color: var(--muted); font-size: 12px; font-weight: 400; }
+  .day {
+    background: var(--panel2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    padding: 11px 14px;
+    margin-bottom: 10px;
+  }
+  .day .dhead { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 6px; }
+  .day .dlabel { font-weight: 700; color: var(--accent); letter-spacing: .05em; }
+  .day .archetype { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--accent2); background: #1e1830; }
+  .day .besttime { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .day .dtext { white-space: pre-wrap; font-size: 14.5px; margin: 4px 0 6px; }
   .ridebox { background: #15233a; border: 1px solid #243352; border-radius: 10px; padding: 11px 14px; }
   .ridebox ul { margin: 0 0 0 18px; padding: 0; font-size: 14px; }
   .ridebox li { margin: 3px 0; }
@@ -257,6 +270,7 @@
   <div class="tabs">
     <button class="tab on" id="tab-optimize" data-mode="optimize">Optimize Post</button>
     <button class="tab" id="tab-repurpose" data-mode="repurpose">Repurpose</button>
+    <button class="tab" id="tab-plan" data-mode="plan">7-Day Plan</button>
     <button class="tab" id="tab-trends" data-mode="trends">Trend Brief</button>
   </div>
   <div class="composer">
@@ -571,6 +585,55 @@ async function repurposeOne(card, key, source, web, timer, voice, performance) {
   }
 }
 
+function renderPlan(r) {
+  const days = Array.isArray(r?.days) ? r.days : [];
+  const dayCards = days.map((d) => {
+    const tags = (d.hashtags || []).map((t) => `<span class="tag">${esc(t)}</span>`).join("");
+    return `
+      <div class="day">
+        <div class="dhead">
+          <span class="dlabel">${esc(d.day || "")} <span class="muted">· day ${esc(String(d.dayIndex ?? ""))}</span></span>
+          ${d.archetype ? `<span class="archetype">${esc(d.archetype)}</span>` : ""}
+          ${d.bestTime ? `<span class="besttime">${esc(d.bestTime)}</span>` : ""}
+          <button class="copy" data-copy="${esc(d.post || "")}">Copy</button>
+        </div>
+        <div class="dtext">${esc(d.post || "")}</div>
+        ${tags ? `<div class="tags">${tags}</div>` : ""}
+      </div>`;
+  }).join("");
+
+  return `
+    <h2>${esc(r.platform || "Plan")} ${r.startDate ? `<span class="asof">· starting ${esc(r.startDate)}</span>` : ""}</h2>
+    <div class="body">
+      ${r.theme ? `<p class="muted" style="margin:0 0 14px">${esc(r.theme)}</p>` : ""}
+      ${dayCards}
+    </div>`;
+}
+
+async function planOne(card, key, topic, web, timer, voice, performance) {
+  try {
+    const r = await fetch("/api/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ topic, platform: key, web, voice: voice || undefined, performance: performance || undefined }),
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
+    clearInterval(timer);
+    card.innerHTML = renderPlan(data.result);
+    card.querySelectorAll(".copy").forEach((b) =>
+      b.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(b.dataset.copy);
+        const t = b.textContent; b.textContent = "Copied!";
+        setTimeout(() => (b.textContent = t), 1200);
+      }));
+  } catch (e) {
+    clearInterval(timer);
+    const name = PLATFORMS.find((p) => p.key === key)?.name || key;
+    card.innerHTML = `<h2>${esc(name)}</h2><div class="body err">⚠ ${esc(e.message)}</div>`;
+  }
+}
+
 async function trendsOne(card, key, topic, timer) {
   try {
     const r = await fetch("/api/trends", {
@@ -604,6 +667,12 @@ const COPY = {
     button: "Repurpose for All",
     loading: (name) => `Asking Grok to repurpose for ${name}…`,
   },
+  plan: {
+    subtitle: "Enter a topic/pillar and get a 7-day post calendar per platform — varied archetypes, all in your voice.",
+    placeholder: "Topic or pillar for the week, e.g. 'cloud cost optimization for engineering teams'…",
+    button: "Plan 7 Days",
+    loading: (name) => `Asking Grok to plan a week for ${name}…`,
+  },
   trends: {
     subtitle: "Enter a topic, pick your platforms, and Grok pulls what's trending right now.",
     placeholder: "Enter a topic or niche, e.g. 'home espresso' or 'AI coding tools'…",
@@ -617,6 +686,7 @@ function setMode(m) {
   const c = COPY[m];
   $("tab-optimize").classList.toggle("on", m === "optimize");
   $("tab-repurpose").classList.toggle("on", m === "repurpose");
+  $("tab-plan").classList.toggle("on", m === "plan");
   $("tab-trends").classList.toggle("on", m === "trends");
   $("subtitle").textContent = c.subtitle;
   $("draft").placeholder = c.placeholder;
@@ -634,6 +704,7 @@ function setMode(m) {
 
 $("tab-optimize").addEventListener("click", () => setMode("optimize"));
 $("tab-repurpose").addEventListener("click", () => setMode("repurpose"));
+$("tab-plan").addEventListener("click", () => setMode("plan"));
 $("tab-trends").addEventListener("click", () => setMode("trends"));
 
 $("go").addEventListener("click", async () => {
@@ -668,7 +739,9 @@ $("go").addEventListener("click", async () => {
       ? trendsOne(div, key, text, timer)
       : mode === "repurpose"
         ? repurposeOne(div, key, text, web, timer, voice, performance)
-        : optimizeOne(div, key, text, web, timer, voice, performance)
+        : mode === "plan"
+          ? planOne(div, key, text, web, timer, voice, performance)
+          : optimizeOne(div, key, text, web, timer, voice, performance)
   ));
   $("go").disabled = false;
 });

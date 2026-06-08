@@ -2,9 +2,9 @@
 import { parseArgs } from "node:util";
 import { readFileSync } from "node:fs";
 import { PLATFORMS, resolvePlatform } from "./platforms.js";
-import { buildPrompt, buildTrendPrompt, buildRepurposePrompt } from "./prompt.js";
+import { buildPrompt, buildTrendPrompt, buildRepurposePrompt, buildPlanPrompt } from "./prompt.js";
 import { runGrok, extractJson } from "./grok.js";
-import { renderReport, renderTrendBrief, renderRepurpose, log } from "./render.js";
+import { renderReport, renderTrendBrief, renderRepurpose, renderPlan, log } from "./render.js";
 import { getVoice } from "./voices.js";
 import { getDataset, topRecords } from "./performance.js";
 
@@ -23,6 +23,7 @@ Options:
   -w, --web              Let Grok pull live trends and ground the post in them (slower)
       --trends           Trend Brief mode: what's hot now for a topic (implies --web)
       --repurpose        Repurpose mode: long source → one native post per platform
+      --plan             Plan Week mode: a 7-day post calendar per platform from a topic
   -v, --voice <name>     Apply a saved voice profile (manage via the web UI)
   -P, --performance <n>  Use a saved performance dataset to ground prompts in
                          what works for YOUR account (manage via the web UI)
@@ -55,6 +56,7 @@ async function main() {
         web: { type: "boolean", short: "w", default: false },
         trends: { type: "boolean", default: false },
         repurpose: { type: "boolean", default: false },
+        plan: { type: "boolean", default: false },
         voice: { type: "string", short: "v" },
         performance: { type: "string", short: "P" },
         model: { type: "string", short: "m" },
@@ -92,8 +94,9 @@ async function main() {
     draft = await readStdin();
   }
 
-  if (values.trends && values.repurpose) {
-    log.error("--trends and --repurpose are mutually exclusive.");
+  const modeCount = [values.trends, values.repurpose, values.plan].filter(Boolean).length;
+  if (modeCount > 1) {
+    log.error("--trends, --repurpose, and --plan are mutually exclusive.");
     process.exit(2);
   }
 
@@ -101,6 +104,7 @@ async function main() {
     log.error(
       values.trends ? "No topic provided." :
       values.repurpose ? "No source content provided." :
+      values.plan ? "No topic provided for the weekly plan." :
       "No draft post provided."
     );
     process.stderr.write(HELP);
@@ -170,7 +174,9 @@ async function main() {
       ? `Finding live trends on ${names} via Grok…`
       : values.repurpose
         ? `Repurposing source into ${names}${voiceSuffix} via Grok…`
-        : `Optimizing for ${names}${voiceSuffix} via Grok…`
+        : values.plan
+          ? `Planning a 7-day week of posts for ${names}${voiceSuffix} via Grok…`
+          : `Optimizing for ${names}${voiceSuffix} via Grok…`
   );
 
   const tasks = platformKeys.map(async (platformKey) => {
@@ -179,11 +185,14 @@ async function main() {
       ? buildTrendPrompt({ platformKey, topic: draft })
       : values.repurpose
         ? buildRepurposePrompt({ platformKey, source: draft, voice, web: values.web, performance })
-        : buildPrompt({ platformKey, draft, web: values.web, voice, performance });
+        : values.plan
+          ? buildPlanPrompt({ platformKey, topic: draft, voice, performance, web: values.web })
+          : buildPrompt({ platformKey, draft, web: values.web, voice, performance });
     const text = await runGrok(prompt, {
       web: values.trends || values.web,
       model: values.model,
       effort: values.effort,
+      maxTurns: values.plan ? (values.web ? 40 : 25) : undefined,
     });
     const data = extractJson(text);
     if (!data.platform) data.platform = PLATFORMS[platformKey].name;
@@ -207,7 +216,10 @@ async function main() {
   if (values.json) {
     process.stdout.write(JSON.stringify(results, null, 2) + "\n");
   } else {
-    const render = values.trends ? renderTrendBrief : values.repurpose ? renderRepurpose : renderReport;
+    const render = values.trends ? renderTrendBrief
+      : values.repurpose ? renderRepurpose
+      : values.plan ? renderPlan
+      : renderReport;
     for (const r of results) process.stdout.write(render(r) + "\n");
   }
 }

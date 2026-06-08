@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { PLATFORMS, resolvePlatform } from "./platforms.js";
-import { buildPrompt, buildTrendPrompt, buildRepurposePrompt, buildPersonaPrompt } from "./prompt.js";
+import { buildPrompt, buildTrendPrompt, buildRepurposePrompt, buildPersonaPrompt, buildPlanPrompt } from "./prompt.js";
 import { fetchPostsFor, compositeScore } from "./ingest.js";
 import { runGrok, extractJson } from "./grok.js";
 import { listVoices, getVoice, saveVoice, deleteVoice, validateName } from "./voices.js";
@@ -100,7 +100,7 @@ const server = createServer(async (req, res) => {
       const performance = await loadPerformanceFor(parsed.performance, key);
 
       const prompt = buildPrompt({ platformKey: key, draft, web, voice, performance });
-      const text = await runGrok(prompt, { web });
+      const text = await runGrok(prompt, { web, maxTurns: web ? 20 : undefined });
       const data = extractJson(text);
       if (!data.platform) data.platform = PLATFORMS[key].name;
       if (voice) data.voice = voice.displayName || voice.name;
@@ -260,6 +260,34 @@ const server = createServer(async (req, res) => {
       }
     }
 
+    if (req.method === "POST" && url.pathname === "/api/plan") {
+      const body = await readBody(req);
+      let parsed;
+      try { parsed = JSON.parse(body || "{}"); } catch { return json(res, 400, { error: "Invalid JSON body." }); }
+      const topic = (parsed.topic || "").trim();
+      const key = resolvePlatform(parsed.platform || "");
+      const web = !!parsed.web;
+      if (!topic) return json(res, 400, { error: "Missing topic." });
+      if (!key) return json(res, 400, { error: `Unknown platform "${parsed.platform}".` });
+
+      let voice = null;
+      if (parsed.voice) {
+        try { voice = await getVoice(parsed.voice); } catch (e) { return json(res, 400, { error: e.message }); }
+        if (!voice) return json(res, 400, { error: `Voice "${parsed.voice}" not found.` });
+      }
+      const performance = await loadPerformanceFor(parsed.performance, key);
+
+      const prompt = buildPlanPrompt({ platformKey: key, topic, voice, performance, web });
+      // A 7-day plan is a big single output; give Grok enough turns to think and
+      // (optionally) search before assembling. 25 is plenty without web; 40 with.
+      const text = await runGrok(prompt, { web, maxTurns: web ? 40 : 25 });
+      const data = extractJson(text);
+      if (!data.platform) data.platform = PLATFORMS[key].name;
+      if (voice) data.voice = voice.displayName || voice.name;
+      if (performance) data.performance = performance.displayName || performance.name;
+      return json(res, 200, { result: data });
+    }
+
     if (req.method === "POST" && url.pathname === "/api/repurpose") {
       const body = await readBody(req);
       let parsed;
@@ -278,7 +306,7 @@ const server = createServer(async (req, res) => {
       const performance = await loadPerformanceFor(parsed.performance, key);
 
       const prompt = buildRepurposePrompt({ platformKey: key, source, voice, web, performance });
-      const text = await runGrok(prompt, { web });
+      const text = await runGrok(prompt, { web, maxTurns: web ? 20 : undefined });
       const data = extractJson(text);
       if (!data.platform) data.platform = PLATFORMS[key].name;
       if (voice) data.voice = voice.displayName || voice.name;
@@ -300,7 +328,10 @@ const server = createServer(async (req, res) => {
       if (!key) return json(res, 400, { error: `Unknown platform "${parsed.platform}".` });
 
       const prompt = buildTrendPrompt({ platformKey: key, topic });
-      const text = await runGrok(prompt, { web: true });
+      // Trend Brief is research-heavy; give Grok enough turns to do multiple searches
+      // before it has to produce the final JSON, otherwise it runs out and returns empty.
+      // 50 leaves headroom even if a search tool fails and triggers retries.
+      const text = await runGrok(prompt, { web: true, maxTurns: 50 });
       const data = extractJson(text);
       if (!data.platform) data.platform = PLATFORMS[key].name;
       return json(res, 200, { result: data });
