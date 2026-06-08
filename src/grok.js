@@ -15,7 +15,27 @@ function grokBinary() {
 }
 
 // Run a single-shot Grok prompt and return its text response.
-export function runGrok(prompt, { web = false, model, effort } = {}) {
+// Automatically retries once on stopReason=Cancelled (transient xAI API
+// cancellation that mostly resolves on a second attempt).
+export async function runGrok(prompt, opts = {}) {
+  try {
+    return await runGrokOnce(prompt, opts);
+  } catch (e) {
+    if (e.stopReason === "Cancelled") {
+      // One retry. If it fails again, the user gets the original Cancelled error.
+      try {
+        return await runGrokOnce(prompt, opts);
+      } catch (retryErr) {
+        // Surface that we tried twice so the user knows it's not a one-off.
+        retryErr.message = "Retried once after Cancelled. " + retryErr.message;
+        throw retryErr;
+      }
+    }
+    throw e;
+  }
+}
+
+function runGrokOnce(prompt, { web = false, model, effort, maxTurns } = {}) {
   const args = [
     "-p",
     prompt,
@@ -27,6 +47,7 @@ export function runGrok(prompt, { web = false, model, effort } = {}) {
   if (effort) args.push("--effort", effort);
   if (!web) args.push("--disable-web-search");
   if (model) args.push("--model", model);
+  if (maxTurns) args.push("--max-turns", String(maxTurns));
 
   const bin = grokBinary();
 
@@ -52,9 +73,8 @@ export function runGrok(prompt, { web = false, model, effort } = {}) {
 
     child.on("close", (code) => {
       if (code !== 0) {
-        reject(
-          new Error(`grok exited with code ${code}.\n${stderr.trim() || stdout.trim()}`)
-        );
+        const clean = stripAnsi(stderr.trim() || stdout.trim());
+        reject(new Error(`grok exited with code ${code}.\n${clean}`));
         return;
       }
       let envelope;
@@ -64,9 +84,29 @@ export function runGrok(prompt, { web = false, model, effort } = {}) {
         reject(new Error(`Could not parse grok output as JSON:\n${stdout.slice(0, 500)}`));
         return;
       }
-      resolve(envelope.text ?? "");
+      const text = envelope.text ?? "";
+      if (!text.trim()) {
+        // Grok exited successfully but produced no text. Surface why so the
+        // caller knows whether to retry, raise max-turns, or change the prompt.
+        const reason = envelope.stopReason || envelope.stop_reason || "unknown";
+        const tail = stderr.trim().slice(-400);
+        const err = new Error(
+          `Grok returned an empty response (stopReason=${reason}). It likely hit a turn limit while searching, or refused silently.${tail ? "\n\nstderr tail:\n" + tail : ""}`
+        );
+        err.stopReason = reason;
+        err.envelope = envelope;
+        reject(err);
+        return;
+      }
+      resolve(text);
     });
   });
+}
+
+// Strip ANSI color/style escape sequences from text (used to clean grok's
+// stderr before showing it to the user; otherwise [2m, [31m, etc. leak through).
+function stripAnsi(s) {
+  return String(s).replace(/\x1b\[[0-9;]*[a-zA-Z]/g, "");
 }
 
 // Extract a JSON object from model text that may contain stray prose or code fences.
